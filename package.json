@@ -1,0 +1,30 @@
+{
+  "name": "firefox-performance-tuner",
+  "version": "1.0.0",
+  "description": "React app for tuning Firefox performance on X11+Mesa",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server.js",
+    "start": "concurrently \"npm run server\" \"npm run dev\""
+  },
+  "keywords": [
+    "firefox",
+    "performance",
+    "tuning",
+    "x11",
+    "mesa"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.3",
+    "concurrently": "^9.2.1",
+    "express": "^5.2.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "vite": "^7.3.1"
+  }
+}

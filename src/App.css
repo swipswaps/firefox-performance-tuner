@@ -1,0 +1,42 @@
+.controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 15px;
+  background: #2a2a2a;
+  border-radius: 4px;
+}
+
+.controls label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.controls select {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #444;
+  padding: 8px;
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+code {
+  background: #1a1a1a;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  color: #4a9eff;
+}
+
+ol {
+  margin-left: 20px;
+  margin-top: 10px;
+}
+
+ol li {
+  margin: 5px 0;
+}
+
