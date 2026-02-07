@@ -3,6 +3,7 @@ import SystemInfo from './components/SystemInfo'
 import PreferencesPanel from './components/PreferencesPanel'
 import ProcessMonitor from './components/ProcessMonitor'
 import LogViewer from './components/LogViewer'
+import UserJsEditor from './components/UserJsEditor'
 import './App.css'
 
 const CRITICAL_PREFS = {
@@ -140,6 +141,8 @@ function App() {
 
       <ProcessMonitor processes={processes} />
       <LogViewer logs={logs} />
+
+      <UserJsEditor />
 
       <div className="refresh-info">
         {isMonitoring ? `Auto-refreshing every ${refreshInterval}s` : 'Monitoring paused'}

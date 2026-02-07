@@ -147,12 +147,12 @@ app.post('/api/apply-preferences', async (req, res) => {
     const { preferences } = req.body
     const profilePath = await resolveProfile()
     const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
-    
+
     let content = ''
     if (existsSync(userJsFile)) {
       content = await readFile(userJsFile, 'utf-8')
     }
-    
+
     let updated = false
     for (const [key, value] of Object.entries(preferences)) {
       if (!content.includes(`user_pref("${key}"`)) {
@@ -160,13 +160,47 @@ app.post('/api/apply-preferences', async (req, res) => {
         updated = true
       }
     }
-    
+
     if (updated) {
       await writeFile(userJsFile, content)
       res.json({ message: 'Preferences applied! Restart Firefox to apply changes.' })
     } else {
       res.json({ message: 'All preferences already present in user.js' })
     }
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Get user.js content
+app.get('/api/user-js', async (req, res) => {
+  try {
+    const profilePath = await resolveProfile()
+    const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
+
+    if (!existsSync(userJsFile)) {
+      return res.json({ content: '', path: userJsFile })
+    }
+
+    const content = await readFile(userJsFile, 'utf-8')
+    res.json({ content, path: userJsFile })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Save user.js content
+app.post('/api/user-js', async (req, res) => {
+  try {
+    const { content } = req.body
+    const profilePath = await resolveProfile()
+    const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
+
+    await writeFile(userJsFile, content, 'utf-8')
+    res.json({
+      message: 'user.js saved successfully! Restart Firefox to apply changes.',
+      path: userJsFile
+    })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
