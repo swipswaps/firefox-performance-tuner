@@ -1,7 +1,7 @@
 import express from 'express'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile, writeFile, copyFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -15,13 +15,82 @@ app.use(express.json())
 const MOZILLA_DIR = `${process.env.HOME}/.mozilla/firefox`
 const STATE_DIR = `${process.env.HOME}/.cache/firefox-hud`
 
+// Categorized preferences with descriptions (inspired by Betterfox Fastfox.js)
+const PREF_CATEGORIES = {
+  'GPU & Rendering': {
+    'gfx.webrender.enable-gpu-thread': {
+      expected: 'false',
+      description: 'Disable separate GPU thread to prevent threading contention on X11+Mesa'
+    },
+    'gfx.gl.multithreaded': {
+      expected: 'false',
+      description: 'Disable Mesa GL multithreading to avoid synchronization delays'
+    },
+    'gfx.webrender.wait-for-gpu': {
+      expected: 'false',
+      description: 'Don\'t block on GPU flush — eliminates WaitFlushedEvent delays'
+    }
+  },
+  'Process Management': {
+    'dom.ipc.processCount': {
+      expected: '4',
+      description: 'Limit total content processes to reduce GPU contention'
+    },
+    'dom.ipc.processCount.web': {
+      expected: '4',
+      description: 'Limit web content processes specifically'
+    }
+  },
+  'Media & Codecs': {
+    'media.ffvpx.enabled': {
+      expected: 'true',
+      description: 'Enable software video decoding fallback (ffvpx)'
+    }
+  },
+  'Network & Prefetch': {
+    'network.prefetch-next': {
+      expected: 'true',
+      description: 'Prefetch linked pages for faster navigation'
+    },
+    'network.dns.disablePrefetch': {
+      expected: 'false',
+      description: 'Allow DNS prefetching for faster domain resolution'
+    },
+    'network.predictor.enabled': {
+      expected: 'true',
+      description: 'Enable network predictor for speculative connections'
+    }
+  },
+  'Cache & Memory': {
+    'browser.cache.disk.enable': {
+      expected: 'true',
+      description: 'Enable disk cache for persistent caching'
+    },
+    'browser.cache.memory.enable': {
+      expected: 'true',
+      description: 'Enable memory cache for fast access'
+    }
+  }
+}
+
+// Flatten categories into a simple key->expected map
+function getFlatPrefs() {
+  const flat = {}
+  for (const cat of Object.values(PREF_CATEGORIES)) {
+    for (const [key, val] of Object.entries(cat)) {
+      flat[key] = val.expected
+    }
+  }
+  return flat
+}
+
 // Resolve active Firefox profile
 async function resolveProfile() {
   const profilesIni = `${MOZILLA_DIR}/profiles.ini`
   try {
     const content = await readFile(profilesIni, 'utf-8')
     const lines = content.split('\n')
-    
+
     // Look for Install-locked default
     let inInstall = false
     for (const line of lines) {
@@ -30,19 +99,28 @@ async function resolveProfile() {
         return line.split('=')[1].trim()
       }
     }
-    
-    // Fallback to Profile with Default=1
-    let inProfile = false
+
+    // Fallback: find Profile section with Default=1, then get its Path
+    let currentPath = ''
+    let foundDefault = false
     for (const line of lines) {
-      if (line.startsWith('[Profile')) inProfile = true
-      if (inProfile && line === 'Default=1') {
-        for (const l of lines) {
-          if (l.startsWith('Path=')) return l.split('=')[1].trim()
-        }
+      if (line.startsWith('[Profile')) {
+        currentPath = ''
+        foundDefault = false
+      }
+      if (line.startsWith('Path=')) {
+        currentPath = line.split('=')[1].trim()
+      }
+      if (line === 'Default=1') {
+        foundDefault = true
+      }
+      if (foundDefault && currentPath) {
+        return currentPath
       }
     }
+    throw new Error('No default profile found in profiles.ini')
   } catch (error) {
-    throw new Error('Cannot resolve Firefox profile')
+    throw new Error(`Cannot resolve Firefox profile: ${error.message}`)
   }
 }
 
@@ -77,41 +155,39 @@ app.get('/api/system-info', async (req, res) => {
   }
 })
 
-// Get Firefox preferences
+// Get Firefox preferences (reads from prefs.js — the runtime state)
 app.get('/api/preferences', async (req, res) => {
   try {
     const profilePath = await resolveProfile()
     const prefsFile = `${MOZILLA_DIR}/${profilePath}/prefs.js`
-    
+
     if (!existsSync(prefsFile)) {
       return res.json({})
     }
-    
+
     const content = await readFile(prefsFile, 'utf-8')
     const prefs = {}
-    
-    const criticalPrefs = [
-      'gfx.webrender.enable-gpu-thread',
-      'gfx.gl.multithreaded',
-      'dom.ipc.processCount',
-      'dom.ipc.processCount.web',
-      'gfx.webrender.wait-for-gpu',
-      'media.ffvpx.enabled',
-      'network.prefetch-next'
-    ]
-    
-    for (const pref of criticalPrefs) {
-      const regex = new RegExp(`user_pref\\("${pref}", ([^)]+)\\)`)
+    const flatPrefs = getFlatPrefs()
+
+    for (const pref of Object.keys(flatPrefs)) {
+      // Match both user_pref("key", value) and pref("key", value) formats
+      const escaped = pref.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const regex = new RegExp(`(?:user_)?pref\\("${escaped}",\\s*([^)]+)\\)`)
       const match = content.match(regex)
       if (match) {
         prefs[pref] = match[1].trim()
       }
     }
-    
+
     res.json(prefs)
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
+})
+
+// Get preference categories with descriptions
+app.get('/api/pref-categories', (req, res) => {
+  res.json(PREF_CATEGORIES)
 })
 
 // Get Firefox processes
@@ -141,12 +217,44 @@ app.get('/api/logs', async (req, res) => {
   }
 })
 
+// Backup user.js before writing (inspired by arkenfox updater)
+async function backupUserJs(userJsFile) {
+  if (existsSync(userJsFile)) {
+    const backupFile = `${userJsFile}.backup`
+    await copyFile(userJsFile, backupFile)
+    return backupFile
+  }
+  return null
+}
+
+// Generate default user.js template from PREF_CATEGORIES
+function generateTemplate() {
+  const lines = [
+    '// Firefox Performance Tuner — user.js',
+    `// Generated: ${new Date().toISOString()}`,
+    '// Optimized for X11 + Mesa + Radeon GPU systems',
+    '// Restart Firefox after saving to apply changes.',
+    ''
+  ]
+  for (const [category, prefs] of Object.entries(PREF_CATEGORIES)) {
+    lines.push(`// === ${category} ===`)
+    for (const [key, val] of Object.entries(prefs)) {
+      lines.push(`// ${val.description}`)
+      lines.push(`user_pref("${key}", ${val.expected});`)
+    }
+    lines.push('')
+  }
+  return lines.join('\n')
+}
+
 // Apply preferences to user.js
 app.post('/api/apply-preferences', async (req, res) => {
   try {
     const { preferences } = req.body
     const profilePath = await resolveProfile()
     const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
+
+    const backupPath = await backupUserJs(userJsFile)
 
     let content = ''
     if (existsSync(userJsFile)) {
@@ -155,7 +263,13 @@ app.post('/api/apply-preferences', async (req, res) => {
 
     let updated = false
     for (const [key, value] of Object.entries(preferences)) {
-      if (!content.includes(`user_pref("${key}"`)) {
+      const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const regex = new RegExp(`user_pref\\("${escaped}",\\s*[^)]+\\)`)
+      if (regex.test(content)) {
+        // Update existing preference
+        content = content.replace(regex, `user_pref("${key}", ${value})`)
+        updated = true
+      } else if (!content.includes(`user_pref("${key}"`)) {
         content += `\nuser_pref("${key}", ${value});`
         updated = true
       }
@@ -163,7 +277,10 @@ app.post('/api/apply-preferences', async (req, res) => {
 
     if (updated) {
       await writeFile(userJsFile, content)
-      res.json({ message: 'Preferences applied! Restart Firefox to apply changes.' })
+      const msg = backupPath
+        ? `Preferences applied! Backup saved to ${backupPath}. Restart Firefox to apply.`
+        : 'Preferences applied! Restart Firefox to apply changes.'
+      res.json({ message: msg })
     } else {
       res.json({ message: 'All preferences already present in user.js' })
     }
@@ -172,35 +289,61 @@ app.post('/api/apply-preferences', async (req, res) => {
   }
 })
 
-// Get user.js content
+// Get user.js content (returns template if file doesn't exist)
 app.get('/api/user-js', async (req, res) => {
   try {
     const profilePath = await resolveProfile()
     const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
 
     if (!existsSync(userJsFile)) {
-      return res.json({ content: '', path: userJsFile })
+      return res.json({ content: generateTemplate(), path: userJsFile, isTemplate: true })
     }
 
     const content = await readFile(userJsFile, 'utf-8')
-    res.json({ content, path: userJsFile })
+    res.json({ content, path: userJsFile, isTemplate: false })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
 })
 
-// Save user.js content
+// Save user.js content (with backup and validation)
 app.post('/api/user-js', async (req, res) => {
   try {
     const { content } = req.body
+
+    if (typeof content !== 'string') {
+      return res.status(400).json({ error: 'Content must be a string' })
+    }
+
     const profilePath = await resolveProfile()
     const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
 
+    const backupPath = await backupUserJs(userJsFile)
+
     await writeFile(userJsFile, content, 'utf-8')
-    res.json({
-      message: 'user.js saved successfully! Restart Firefox to apply changes.',
-      path: userJsFile
-    })
+    const msg = backupPath
+      ? `user.js saved! Backup at ${backupPath}. Restart Firefox to apply.`
+      : 'user.js saved successfully! Restart Firefox to apply changes.'
+    res.json({ message: msg, path: userJsFile })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Restore user.js from backup
+app.post('/api/user-js/restore', async (req, res) => {
+  try {
+    const profilePath = await resolveProfile()
+    const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
+    const backupFile = `${userJsFile}.backup`
+
+    if (!existsSync(backupFile)) {
+      return res.status(404).json({ error: 'No backup file found' })
+    }
+
+    await copyFile(backupFile, userJsFile)
+    const content = await readFile(userJsFile, 'utf-8')
+    res.json({ message: 'Restored from backup! Restart Firefox to apply.', content })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }

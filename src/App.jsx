@@ -6,25 +6,15 @@ import LogViewer from './components/LogViewer'
 import UserJsEditor from './components/UserJsEditor'
 import './App.css'
 
-const CRITICAL_PREFS = {
-  'gfx.webrender.enable-gpu-thread': 'false',
-  'gfx.gl.multithreaded': 'false',
-  'dom.ipc.processCount': '4',
-  'dom.ipc.processCount.web': '4',
-  'gfx.webrender.wait-for-gpu': 'false',
-  'media.ffvpx.enabled': 'true',
-  'network.prefetch-next': 'true'
-}
-
 function App() {
   const [systemInfo, setSystemInfo] = useState(null)
   const [preferences, setPreferences] = useState({})
+  const [prefCategories, setPrefCategories] = useState({})
   const [processes, setProcesses] = useState([])
   const [logs, setLogs] = useState([])
   const [refreshInterval, setRefreshInterval] = useState(5)
   const [isMonitoring, setIsMonitoring] = useState(false)
 
-  // Fetch system information
   const fetchSystemInfo = async () => {
     try {
       const response = await fetch('/api/system-info')
@@ -35,7 +25,6 @@ function App() {
     }
   }
 
-  // Fetch Firefox preferences
   const fetchPreferences = async () => {
     try {
       const response = await fetch('/api/preferences')
@@ -46,7 +35,16 @@ function App() {
     }
   }
 
-  // Fetch Firefox processes
+  const fetchPrefCategories = async () => {
+    try {
+      const response = await fetch('/api/pref-categories')
+      const data = await response.json()
+      setPrefCategories(data)
+    } catch (error) {
+      console.error('Failed to fetch pref categories:', error)
+    }
+  }
+
   const fetchProcesses = async () => {
     try {
       const response = await fetch('/api/processes')
@@ -57,7 +55,6 @@ function App() {
     }
   }
 
-  // Fetch MOZ_LOG logs
   const fetchLogs = async () => {
     try {
       const response = await fetch('/api/logs')
@@ -68,13 +65,23 @@ function App() {
     }
   }
 
-  // Apply preferences to user.js
+  // Build flat expected prefs from categories
+  const getCriticalPrefs = () => {
+    const flat = {}
+    for (const cat of Object.values(prefCategories)) {
+      for (const [key, val] of Object.entries(cat)) {
+        flat[key] = val.expected
+      }
+    }
+    return flat
+  }
+
   const applyPreferences = async () => {
     try {
       const response = await fetch('/api/apply-preferences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preferences: CRITICAL_PREFS })
+        body: JSON.stringify({ preferences: getCriticalPrefs() })
       })
       const result = await response.json()
       alert(result.message)
@@ -85,7 +92,6 @@ function App() {
     }
   }
 
-  // Auto-refresh data
   useEffect(() => {
     if (isMonitoring) {
       const interval = setInterval(() => {
@@ -94,15 +100,14 @@ function App() {
         fetchProcesses()
         fetchLogs()
       }, refreshInterval * 1000)
-
       return () => clearInterval(interval)
     }
   }, [isMonitoring, refreshInterval])
 
-  // Initial load
   useEffect(() => {
     fetchSystemInfo()
     fetchPreferences()
+    fetchPrefCategories()
     fetchProcesses()
     fetchLogs()
   }, [])
@@ -119,7 +124,7 @@ function App() {
           {isMonitoring ? '⏸ Pause Monitoring' : '▶ Start Monitoring'}
         </button>
         <button onClick={applyPreferences}>
-          ⚙️ Apply Critical Preferences
+          ⚙️ Apply All Optimized Preferences
         </button>
         <label>
           Refresh Interval:
@@ -131,13 +136,12 @@ function App() {
         </label>
       </div>
 
-      <div className="grid">
-        <SystemInfo data={systemInfo} />
-        <PreferencesPanel 
-          preferences={preferences} 
-          criticalPrefs={CRITICAL_PREFS} 
-        />
-      </div>
+      <SystemInfo data={systemInfo} />
+
+      <PreferencesPanel
+        preferences={preferences}
+        categories={prefCategories}
+      />
 
       <ProcessMonitor processes={processes} />
       <LogViewer logs={logs} />
