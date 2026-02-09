@@ -15,60 +15,186 @@ app.use(express.json())
 const MOZILLA_DIR = `${process.env.HOME}/.mozilla/firefox`
 const STATE_DIR = `${process.env.HOME}/.cache/firefox-hud`
 
-// Categorized preferences with descriptions (inspired by Betterfox Fastfox.js)
+// Categorized preferences with descriptions
+// Sources: Betterfox v146, ArchWiki Firefox/Tweaks (Jan 2026), Mozilla docs
+// Optimized for: VM with llvmpipe (software rendering), 8GB RAM, 2 cores
 const PREF_CATEGORIES = {
   'GPU & Rendering': {
-    'gfx.webrender.enable-gpu-thread': {
-      expected: 'false',
-      description: 'Disable separate GPU thread to prevent threading contention on X11+Mesa'
+    'gfx.webrender.all': {
+      expected: 'true',
+      description: 'Force WebRender for all content — GPU-accelerated 2D rendering (Betterfox)'
     },
-    'gfx.gl.multithreaded': {
-      expected: 'false',
-      description: 'Disable Mesa GL multithreading to avoid synchronization delays'
+    'gfx.webrender.software': {
+      expected: 'true',
+      description: 'Enable Software WebRender — required when hardware GPU is unavailable (llvmpipe/VM)'
     },
-    'gfx.webrender.wait-for-gpu': {
+    'gfx.canvas.accelerated.cache-items': {
+      expected: '32768',
+      description: 'Increase accelerated canvas cache items for smoother rendering (Betterfox)'
+    },
+    'gfx.canvas.accelerated.cache-size': {
+      expected: '4096',
+      description: 'Increase accelerated canvas cache size in MB (Betterfox)'
+    },
+    'gfx.content.skia-font-cache-size': {
+      expected: '32',
+      description: 'Increase Skia font cache — reduces font re-rasterization (Betterfox)'
+    },
+    'image.cache.size': {
+      expected: '10485760',
+      description: 'Increase decoded image cache to 10MB — fewer re-decodes (Betterfox)'
+    },
+    'image.mem.decode_bytes_at_a_time': {
+      expected: '65536',
+      description: 'Decode images in 64KB chunks instead of 16KB — faster loading (Betterfox)'
+    }
+  },
+  'Cache & Memory': {
+    'browser.cache.disk.enable': {
       expected: 'false',
-      description: 'Don\'t block on GPU flush — eliminates WaitFlushedEvent delays'
+      description: 'Disable disk cache — eliminates frequent disk writes, use memory only (Betterfox/ArchWiki)'
+    },
+    'browser.cache.memory.enable': {
+      expected: 'true',
+      description: 'Enable memory cache for fast access to recently loaded resources'
+    },
+    'browser.cache.memory.capacity': {
+      expected: '131072',
+      description: 'Set memory cache to 128MB — default auto-select uses decade-old table (Betterfox)'
+    },
+    'browser.cache.memory.max_entry_size': {
+      expected: '20480',
+      description: 'Allow up to 20MB per cache entry — prevents large resources from bypassing cache (Betterfox)'
+    },
+    'browser.sessionhistory.max_total_viewers': {
+      expected: '4',
+      description: 'Keep 4 pages in back/forward cache — balance between memory and speed (Betterfox)'
+    },
+    'browser.privatebrowsing.forceMediaMemoryCache': {
+      expected: 'true',
+      description: 'Force media to use memory cache — avoids disk writes for media (Betterfox)'
+    }
+  },
+  'Media': {
+    'media.memory_cache_max_size': {
+      expected: '262144',
+      description: 'Increase media memory cache to 256MB — smoother video playback (Betterfox)'
+    },
+    'media.memory_caches_combined_limit_kb': {
+      expected: '1048576',
+      description: 'Combined media cache limit 1GB — prevents cache eviction during streaming (Betterfox)'
+    },
+    'media.cache_readahead_limit': {
+      expected: '600',
+      description: 'Read ahead 600 seconds of media — fewer buffering stalls (Betterfox)'
+    },
+    'media.cache_resume_threshold': {
+      expected: '300',
+      description: 'Resume caching when buffer drops below 300s — prevents buffer underruns (Betterfox)'
+    },
+    'media.ffvpx.enabled': {
+      expected: 'true',
+      description: 'Enable software video decoding (ffvpx) — required when no hardware VA-API'
+    }
+  },
+  'Network': {
+    'network.http.max-connections': {
+      expected: '1800',
+      description: 'Increase max connections from 900 to 1800 — faster parallel downloads (Betterfox)'
+    },
+    'network.http.max-persistent-connections-per-server': {
+      expected: '10',
+      description: 'Allow 10 persistent connections per server (default 6) — faster page loads (Betterfox)'
+    },
+    'network.http.max-urgent-start-excessive-connections-per-host': {
+      expected: '5',
+      description: 'Allow 5 urgent connections per host — faster critical resource loading (Betterfox)'
+    },
+    'network.http.pacing.requests.enabled': {
+      expected: 'false',
+      description: 'Disable request pacing — send requests immediately without throttling (Betterfox)'
+    },
+    'network.dnsCacheEntries': {
+      expected: '10000',
+      description: 'Cache 10K DNS entries (default 400) — fewer DNS lookups (Betterfox)'
+    },
+    'network.dnsCacheExpiration': {
+      expected: '3600',
+      description: 'Keep DNS cache entries for 1 hour (default 60s) — fewer re-lookups (Betterfox)'
+    },
+    'network.ssl_tokens_cache_capacity': {
+      expected: '10240',
+      description: 'Increase SSL session token cache — faster HTTPS reconnections (Betterfox)'
+    }
+  },
+  'Speculative Loading': {
+    'network.http.speculative-parallel-limit': {
+      expected: '0',
+      description: 'Disable speculative connections — saves CPU/bandwidth on low-end systems (Betterfox)'
+    },
+    'network.dns.disablePrefetch': {
+      expected: 'true',
+      description: 'Disable DNS prefetching — saves resources, improves privacy (Betterfox)'
+    },
+    'network.dns.disablePrefetchFromHTTPS': {
+      expected: 'true',
+      description: 'Disable DNS prefetch from HTTPS pages — saves resources (Betterfox)'
+    },
+    'network.prefetch-next': {
+      expected: 'false',
+      description: 'Disable link prefetching — prevents unwanted background downloads (Betterfox)'
+    },
+    'browser.urlbar.speculativeConnect.enabled': {
+      expected: 'false',
+      description: 'Disable speculative URL bar connections — saves resources (Betterfox)'
+    },
+    'browser.places.speculativeConnect.enabled': {
+      expected: 'false',
+      description: 'Disable bookmarks speculative connections (Betterfox)'
     }
   },
   'Process Management': {
     'dom.ipc.processCount': {
       expected: '4',
-      description: 'Limit total content processes to reduce GPU contention'
+      description: 'Limit content processes to 4 — optimal for 2-core CPU, reduces memory/CPU contention (ArchWiki)'
     },
-    'dom.ipc.processCount.web': {
-      expected: '4',
-      description: 'Limit web content processes specifically'
+    'browser.sessionstore.interval': {
+      expected: '600000',
+      description: 'Save session every 10 minutes instead of 15s — reduces disk writes (ArchWiki)'
+    },
+    'browser.sessionstore.max_tabs_undo': {
+      expected: '10',
+      description: 'Keep undo data for 10 tabs — balance between memory and convenience (Betterfox)'
     }
   },
-  'Media & Codecs': {
-    'media.ffvpx.enabled': {
-      expected: 'true',
-      description: 'Enable software video decoding fallback (ffvpx)'
-    }
-  },
-  'Network & Prefetch': {
-    'network.prefetch-next': {
-      expected: 'true',
-      description: 'Prefetch linked pages for faster navigation'
-    },
-    'network.dns.disablePrefetch': {
+  'Telemetry & Experiments': {
+    'datareporting.policy.dataSubmissionEnabled': {
       expected: 'false',
-      description: 'Allow DNS prefetching for faster domain resolution'
+      description: 'Disable data reporting — saves bandwidth and CPU (Betterfox)'
     },
-    'network.predictor.enabled': {
-      expected: 'true',
-      description: 'Enable network predictor for speculative connections'
-    }
-  },
-  'Cache & Memory': {
-    'browser.cache.disk.enable': {
-      expected: 'true',
-      description: 'Enable disk cache for persistent caching'
+    'toolkit.telemetry.enabled': {
+      expected: 'false',
+      description: 'Disable telemetry collection — reduces background CPU usage (Betterfox)'
     },
-    'browser.cache.memory.enable': {
-      expected: 'true',
-      description: 'Enable memory cache for fast access'
+    'toolkit.telemetry.unified': {
+      expected: 'false',
+      description: 'Disable unified telemetry — prevents data gathering overhead (Betterfox)'
+    },
+    'toolkit.telemetry.archive.enabled': {
+      expected: 'false',
+      description: 'Disable telemetry archive — saves disk writes (Betterfox)'
+    },
+    'app.normandy.enabled': {
+      expected: 'false',
+      description: 'Disable remote experiment/study system — prevents unexpected behavior changes (Betterfox)'
+    },
+    'app.shield.optoutstudies.enabled': {
+      expected: 'false',
+      description: 'Opt out of Shield studies — prevents A/B test overhead (Betterfox)'
+    },
+    'browser.newtabpage.activity-stream.feeds.telemetry': {
+      expected: 'false',
+      description: 'Disable new tab telemetry feed — saves CPU on every new tab (Betterfox)'
     }
   }
 }
@@ -190,11 +316,165 @@ app.get('/api/pref-categories', (req, res) => {
   res.json(PREF_CATEGORIES)
 })
 
-// Get Firefox processes
+// System benchmark — detect capabilities and generate recommendations
+app.get('/api/benchmark', async (req, res) => {
+  try {
+    const results = { gpu: {}, system: {}, recommendations: [], score: 0 }
+
+    // GPU detection
+    try {
+      const { stdout } = await execAsync('glxinfo 2>/dev/null | grep -m1 "OpenGL renderer"')
+      results.gpu.renderer = stdout.split(':')[1]?.trim() || 'unknown'
+    } catch { results.gpu.renderer = 'unavailable' }
+
+    try {
+      const { stdout } = await execAsync('glxinfo 2>/dev/null | grep -m1 "OpenGL version"')
+      results.gpu.glVersion = stdout.split(':')[1]?.trim() || 'unknown'
+    } catch { results.gpu.glVersion = 'unavailable' }
+
+    try {
+      const { stdout } = await execAsync('lspci 2>/dev/null | grep -iE "vga|3d|display"')
+      results.gpu.device = stdout.trim().replace(/^[^:]+:\s*/, '') || 'unknown'
+    } catch { results.gpu.device = 'unavailable' }
+
+    results.gpu.isSoftwareRenderer = /llvmpipe|softpipe|swrast/i.test(results.gpu.renderer)
+    results.gpu.isVirtual = /virtio|vmware|virtualbox|qxl/i.test(results.gpu.device || '')
+
+    // System info
+    try {
+      const { stdout } = await execAsync('cat /proc/meminfo | grep MemTotal')
+      results.system.ramKb = parseInt(stdout.split(/\s+/)[1]) || 0
+      results.system.ramMb = Math.round(results.system.ramKb / 1024)
+      results.system.ramGb = (results.system.ramKb / 1048576).toFixed(1)
+    } catch { results.system.ramKb = 0 }
+
+    try {
+      const { stdout } = await execAsync('nproc')
+      results.system.cpuCores = parseInt(stdout.trim()) || 1
+    } catch { results.system.cpuCores = 1 }
+
+    try {
+      const { stdout } = await execAsync('cat /proc/cpuinfo | grep "model name" | head -1')
+      results.system.cpuModel = stdout.split(':')[1]?.trim() || 'unknown'
+    } catch { results.system.cpuModel = 'unknown' }
+
+    // VA-API (hardware video decode)
+    try {
+      const { stdout } = await execAsync('vainfo 2>&1 | grep -m1 "Driver version"')
+      results.gpu.vaapi = stdout.split(':')[1]?.trim() || 'unavailable'
+      results.gpu.hasVaapi = true
+    } catch {
+      results.gpu.vaapi = 'not available'
+      results.gpu.hasVaapi = false
+    }
+
+    // Generate recommendations
+    let score = 100
+    const recs = []
+
+    if (results.gpu.isSoftwareRenderer) {
+      score -= 40
+      recs.push({
+        severity: 'critical',
+        title: 'Software Rendering (llvmpipe)',
+        detail: 'Your system uses CPU-based software rendering instead of a real GPU. This is the #1 cause of Firefox slowness. Enable Software WebRender and disable GPU-dependent features.',
+        prefs: ['gfx.webrender.software=true', 'gfx.webrender.all=true']
+      })
+    }
+
+    if (results.gpu.isVirtual) {
+      score -= 10
+      recs.push({
+        severity: 'warning',
+        title: 'Virtual GPU Detected',
+        detail: 'Running in a VM with a virtual GPU. Hardware acceleration is limited. Software rendering optimizations are recommended.',
+        prefs: []
+      })
+    }
+
+    if (!results.gpu.hasVaapi) {
+      score -= 10
+      recs.push({
+        severity: 'warning',
+        title: 'No Hardware Video Decoding (VA-API)',
+        detail: 'VA-API is not available — video decoding uses CPU. Increase media memory cache to reduce re-decoding overhead.',
+        prefs: ['media.memory_cache_max_size=262144', 'media.ffvpx.enabled=true']
+      })
+    }
+
+    if (results.system.ramKb < 4194304) {
+      score -= 15
+      recs.push({
+        severity: 'warning',
+        title: 'Low RAM (<4GB)',
+        detail: 'Limited RAM detected. Reduce cache sizes and limit content processes.',
+        prefs: ['dom.ipc.processCount=2', 'browser.cache.memory.capacity=65536']
+      })
+    } else if (results.system.ramKb >= 8388608) {
+      recs.push({
+        severity: 'ok',
+        title: 'Sufficient RAM (8GB+)',
+        detail: 'RAM is adequate for 128MB memory cache and 4 content processes.',
+        prefs: []
+      })
+    }
+
+    if (results.system.cpuCores <= 2) {
+      score -= 10
+      recs.push({
+        severity: 'warning',
+        title: `Low CPU cores (${results.system.cpuCores})`,
+        detail: 'Few CPU cores detected. Limit content processes to 4 to reduce CPU contention and context switching.',
+        prefs: ['dom.ipc.processCount=4']
+      })
+    }
+
+    recs.push({
+      severity: 'info',
+      title: 'Disable Telemetry',
+      detail: 'Mozilla telemetry collects usage data in the background. Disabling it saves CPU and bandwidth.',
+      prefs: ['toolkit.telemetry.enabled=false', 'datareporting.policy.dataSubmissionEnabled=false']
+    })
+
+    recs.push({
+      severity: 'info',
+      title: 'Disable Disk Cache',
+      detail: 'Disk cache causes frequent I/O writes. Using memory-only cache is faster, especially on VM disk or SSDs with limited write endurance.',
+      prefs: ['browser.cache.disk.enable=false', 'browser.cache.memory.capacity=131072']
+    })
+
+    results.recommendations = recs
+    results.score = Math.max(0, score)
+    res.json(results)
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Get Firefox processes (structured output)
 app.get('/api/processes', async (req, res) => {
   try {
-    const { stdout } = await execAsync('ps aux | grep firefox | grep -v grep | head -n 6')
-    const processes = stdout.trim().split('\n').filter(line => line.length > 0)
+    const { stdout } = await execAsync(
+      `ps -eo pid,pcpu,pmem,rss,args --no-headers | grep '[/]usr/lib64/firefox/' | head -n 30`
+    )
+    const lines = stdout.trim().split('\n').filter(line => line.length > 0)
+    const processes = lines.map(line => {
+      const parts = line.trim().split(/\s+/)
+      if (parts.length < 5) return null
+      const pid = parseInt(parts[0])
+      const cpu = parseFloat(parts[1]) || 0
+      const mem = parseFloat(parts[2]) || 0
+      const rss = parseInt(parts[3]) || 0
+      const args = parts.slice(4).join(' ')
+      // Extract process type from last argument
+      const lastArg = parts[parts.length - 1]
+      const knownTypes = ['tab', 'socket', 'rdd', 'utility', 'forkserver']
+      const type = knownTypes.includes(lastArg) ? lastArg
+        : args.includes('crashhelper') ? 'crashhelper'
+        : !args.includes('-contentproc') ? 'main'
+        : 'content'
+      return { pid, cpu, mem, rss, type, args }
+    }).filter(Boolean)
     res.json(processes)
   } catch (error) {
     res.json([])
@@ -232,7 +512,7 @@ function generateTemplate() {
   const lines = [
     '// Firefox Performance Tuner — user.js',
     `// Generated: ${new Date().toISOString()}`,
-    '// Optimized for X11 + Mesa + Radeon GPU systems',
+    '// Sources: Betterfox v146, ArchWiki Firefox/Tweaks, Mozilla docs',
     '// Restart Firefox after saving to apply changes.',
     ''
   ]

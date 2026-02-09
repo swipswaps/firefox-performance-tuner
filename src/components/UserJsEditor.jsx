@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import './UserJsEditor.css'
 
-function UserJsEditor() {
+function UserJsEditor({ showToast }) {
   const [content, setContent] = useState('')
   const [originalContent, setOriginalContent] = useState('')
   const [filePath, setFilePath] = useState('')
   const [isModified, setIsModified] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
-  const [message, setMessage] = useState('')
+
+  const notify = showToast || (() => {})
 
   // Load user.js content
   const loadUserJs = async () => {
@@ -20,14 +21,13 @@ function UserJsEditor() {
       setIsModified(false)
     } catch (error) {
       console.error('Failed to load user.js:', error)
-      setMessage('❌ Failed to load user.js')
+      notify('Failed to load user.js', 'error')
     }
   }
 
   // Save user.js content
   const saveUserJs = async () => {
     setIsSaving(true)
-    setMessage('')
     try {
       const response = await fetch('/api/user-js', {
         method: 'POST',
@@ -35,12 +35,12 @@ function UserJsEditor() {
         body: JSON.stringify({ content })
       })
       const result = await response.json()
-      setMessage(`✅ ${result.message}`)
+      notify(result.message, 'success')
       setOriginalContent(content)
       setIsModified(false)
     } catch (error) {
       console.error('Failed to save user.js:', error)
-      setMessage('❌ Failed to save user.js')
+      notify('Failed to save user.js', 'error')
     } finally {
       setIsSaving(false)
     }
@@ -57,7 +57,6 @@ function UserJsEditor() {
   const handleReset = () => {
     setContent(originalContent)
     setIsModified(false)
-    setMessage('')
   }
 
   // Load on mount
@@ -93,12 +92,6 @@ function UserJsEditor() {
           ↩️ Reset
         </button>
       </div>
-
-      {message && (
-        <div className={`editor-message ${message.startsWith('✅') ? 'success' : 'error'}`}>
-          {message}
-        </div>
-      )}
 
       <textarea
         className="user-js-textarea"
