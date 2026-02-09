@@ -25,7 +25,7 @@ function UserJsEditor({ showToast }) {
     }
   }
 
-  // Save user.js content
+  // Save user.js content (handles validation + Firefox running errors)
   const saveUserJs = async () => {
     setIsSaving(true)
     try {
@@ -35,9 +35,13 @@ function UserJsEditor({ showToast }) {
         body: JSON.stringify({ content })
       })
       const result = await response.json()
-      notify(result.message, 'success')
-      setOriginalContent(content)
-      setIsModified(false)
+      if (!response.ok) {
+        notify(result.error || 'Save failed', 'error')
+      } else {
+        notify(result.message, 'success')
+        setOriginalContent(content)
+        setIsModified(false)
+      }
     } catch (error) {
       console.error('Failed to save user.js:', error)
       notify('Failed to save user.js', 'error')

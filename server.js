@@ -1,16 +1,31 @@
 import express from 'express'
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { readFile, writeFile, copyFile } from 'fs/promises'
+import { readFile, writeFile, copyFile, readdir, unlink } from 'fs/promises'
 import { existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import helmet from 'helmet'
+import rateLimit from 'express-rate-limit'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const app = express()
-app.use(express.json())
+
+// === SECURITY BASELINE (OWASP + Express best practices) ===
+app.disable('x-powered-by')
+app.use(helmet({ contentSecurityPolicy: false })) // CSP off — Vite injects inline scripts in dev
+app.use(express.json({ limit: '1mb' }))
+
+const limiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 minute window
+  max: 60,               // 60 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, try again later' }
+})
+app.use('/api/', limiter)
 
 const MOZILLA_DIR = `${process.env.HOME}/.mozilla/firefox`
 const STATE_DIR = `${process.env.HOME}/.cache/firefox-hud`
@@ -210,6 +225,72 @@ function getFlatPrefs() {
   return flat
 }
 
+// === SECURITY HELPERS ===
+
+// Strip filesystem paths and stack traces from error messages (OWASP: information disclosure)
+function safeError(error) {
+  const msg = (error.message || 'Internal server error')
+    .replace(/\/home\/[^\s]+/g, '[path]')
+    .replace(/\n.*at .*/g, '')
+  return { error: msg.length > 200 ? 'Operation failed' : msg }
+}
+
+// Validate user.js content — only allow user_pref() lines, comments, and blanks
+function validateUserJS(content) {
+  if (typeof content !== 'string') return { valid: false, reason: 'Content must be a string' }
+  if (content.length > 512 * 1024) return { valid: false, reason: 'Content too large (max 512KB)' }
+
+  const lines = content.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (line === '' || line.startsWith('//')) continue
+    if (!/^user_pref\("[-a-zA-Z0-9._]+",\s*(true|false|-?\d+|"[^"]*")\);$/.test(line)) {
+      return { valid: false, reason: `Invalid syntax on line ${i + 1}: ${line.substring(0, 80)}` }
+    }
+  }
+  return { valid: true }
+}
+
+// Rotate backups — keep timestamped copies, prune to maxBackups (arkenfox pattern)
+async function rotateBackups(filePath, maxBackups = 5) {
+  if (!existsSync(filePath)) return null
+
+  const dir = path.dirname(filePath)
+  const base = path.basename(filePath)
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const backupPath = path.join(dir, `${base}.backup-${timestamp}`)
+
+  await copyFile(filePath, backupPath)
+
+  // Prune old backups beyond maxBackups
+  const files = await readdir(dir)
+  const backups = files
+    .filter(f => f.startsWith(`${base}.backup-`))
+    .sort()
+    .reverse()
+
+  for (const old of backups.slice(maxBackups)) {
+    await unlink(path.join(dir, old)).catch(() => {})
+  }
+
+  return backupPath
+}
+
+// Check if Firefox is running — refuse writes while profile is active
+async function isFirefoxRunning() {
+  try {
+    const { stdout } = await execFileAsync('pgrep', ['-x', 'firefox'], { timeout: 3000 })
+    return stdout.trim().length > 0
+  } catch {
+    return false
+  }
+}
+
+// === HEALTH ENDPOINT ===
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', mode: 'full', version: '1.1.0' })
+})
+
 // Resolve active Firefox profile
 async function resolveProfile() {
   const profilesIni = `${MOZILLA_DIR}/profiles.ini`
@@ -250,34 +331,34 @@ async function resolveProfile() {
   }
 }
 
-// Get system information
+// Get system information (execFile — no shell spawning)
 app.get('/api/system-info', async (req, res) => {
   try {
     const display = process.env.DISPLAY || '<not set>'
     const session = process.env.XDG_SESSION_TYPE || '<not set>'
-    
+
     let renderer = '<not available>'
     let version = '<not available>'
     let vaapi = '<not available>'
-    
+
     try {
-      const { stdout: glxOutput } = await execAsync('glxinfo 2>/dev/null | grep -m1 "OpenGL renderer"')
-      renderer = glxOutput.split(':')[1]?.trim() || '<not available>'
+      const { stdout } = await execFileAsync('glxinfo', [], { timeout: 5000 })
+      const rendererLine = stdout.split('\n').find(l => l.includes('OpenGL renderer'))
+      renderer = rendererLine?.split(':')[1]?.trim() || '<not available>'
+      const versionLine = stdout.split('\n').find(l => l.includes('OpenGL version'))
+      version = versionLine?.split(':')[1]?.trim() || '<not available>'
     } catch {}
-    
+
     try {
-      const { stdout: glxVersion } = await execAsync('glxinfo 2>/dev/null | grep -m1 "OpenGL version"')
-      version = glxVersion.split(':')[1]?.trim() || '<not available>'
+      const { stdout, stderr } = await execFileAsync('vainfo', [], { timeout: 5000 })
+      const combined = stdout + stderr
+      const driverLine = combined.split('\n').find(l => l.includes('Driver version'))
+      vaapi = driverLine?.split(':')[1]?.trim() || '<not available>'
     } catch {}
-    
-    try {
-      const { stdout: vaapiOutput } = await execAsync('vainfo 2>&1 | grep -m1 "Driver version"')
-      vaapi = vaapiOutput.split(':')[1]?.trim() || '<not available>'
-    } catch {}
-    
+
     res.json({ display, session, renderer, version, vaapi })
   } catch (error) {
-    res.status(500).json({ error: error.message })
+    res.status(500).json(safeError(error))
   }
 })
 
@@ -307,7 +388,7 @@ app.get('/api/preferences', async (req, res) => {
 
     res.json(prefs)
   } catch (error) {
-    res.status(500).json({ error: error.message })
+    res.status(500).json(safeError(error))
   }
 })
 
@@ -321,47 +402,53 @@ app.get('/api/benchmark', async (req, res) => {
   try {
     const results = { gpu: {}, system: {}, recommendations: [], score: 0 }
 
-    // GPU detection
+    // GPU detection (execFile — no shell)
     try {
-      const { stdout } = await execAsync('glxinfo 2>/dev/null | grep -m1 "OpenGL renderer"')
-      results.gpu.renderer = stdout.split(':')[1]?.trim() || 'unknown'
-    } catch { results.gpu.renderer = 'unavailable' }
+      const { stdout } = await execFileAsync('glxinfo', [], { timeout: 5000 })
+      const rendererLine = stdout.split('\n').find(l => l.includes('OpenGL renderer'))
+      results.gpu.renderer = rendererLine?.split(':')[1]?.trim() || 'unknown'
+      const versionLine = stdout.split('\n').find(l => l.includes('OpenGL version'))
+      results.gpu.glVersion = versionLine?.split(':')[1]?.trim() || 'unknown'
+    } catch {
+      results.gpu.renderer = 'unavailable'
+      results.gpu.glVersion = 'unavailable'
+    }
 
     try {
-      const { stdout } = await execAsync('glxinfo 2>/dev/null | grep -m1 "OpenGL version"')
-      results.gpu.glVersion = stdout.split(':')[1]?.trim() || 'unknown'
-    } catch { results.gpu.glVersion = 'unavailable' }
-
-    try {
-      const { stdout } = await execAsync('lspci 2>/dev/null | grep -iE "vga|3d|display"')
-      results.gpu.device = stdout.trim().replace(/^[^:]+:\s*/, '') || 'unknown'
+      const { stdout } = await execFileAsync('lspci', [], { timeout: 5000 })
+      const gpuLine = stdout.split('\n').find(l => /vga|3d|display/i.test(l))
+      results.gpu.device = gpuLine?.replace(/^[^:]+:\s*/, '').trim() || 'unknown'
     } catch { results.gpu.device = 'unavailable' }
 
     results.gpu.isSoftwareRenderer = /llvmpipe|softpipe|swrast/i.test(results.gpu.renderer)
     results.gpu.isVirtual = /virtio|vmware|virtualbox|qxl/i.test(results.gpu.device || '')
 
-    // System info
+    // System info (read /proc directly — no shell needed)
     try {
-      const { stdout } = await execAsync('cat /proc/meminfo | grep MemTotal')
-      results.system.ramKb = parseInt(stdout.split(/\s+/)[1]) || 0
+      const meminfo = await readFile('/proc/meminfo', 'utf-8')
+      const memLine = meminfo.split('\n').find(l => l.startsWith('MemTotal'))
+      results.system.ramKb = parseInt(memLine?.split(/\s+/)[1]) || 0
       results.system.ramMb = Math.round(results.system.ramKb / 1024)
       results.system.ramGb = (results.system.ramKb / 1048576).toFixed(1)
     } catch { results.system.ramKb = 0 }
 
     try {
-      const { stdout } = await execAsync('nproc')
+      const { stdout } = await execFileAsync('nproc', [], { timeout: 3000 })
       results.system.cpuCores = parseInt(stdout.trim()) || 1
     } catch { results.system.cpuCores = 1 }
 
     try {
-      const { stdout } = await execAsync('cat /proc/cpuinfo | grep "model name" | head -1')
-      results.system.cpuModel = stdout.split(':')[1]?.trim() || 'unknown'
+      const cpuinfo = await readFile('/proc/cpuinfo', 'utf-8')
+      const modelLine = cpuinfo.split('\n').find(l => l.includes('model name'))
+      results.system.cpuModel = modelLine?.split(':')[1]?.trim() || 'unknown'
     } catch { results.system.cpuModel = 'unknown' }
 
     // VA-API (hardware video decode)
     try {
-      const { stdout } = await execAsync('vainfo 2>&1 | grep -m1 "Driver version"')
-      results.gpu.vaapi = stdout.split(':')[1]?.trim() || 'unavailable'
+      const { stdout, stderr } = await execFileAsync('vainfo', [], { timeout: 5000 })
+      const combined = stdout + stderr
+      const driverLine = combined.split('\n').find(l => l.includes('Driver version'))
+      results.gpu.vaapi = driverLine?.split(':')[1]?.trim() || 'unavailable'
       results.gpu.hasVaapi = true
     } catch {
       results.gpu.vaapi = 'not available'
@@ -447,65 +534,131 @@ app.get('/api/benchmark', async (req, res) => {
     results.score = Math.max(0, score)
     res.json(results)
   } catch (error) {
-    res.status(500).json({ error: error.message })
+    res.status(500).json(safeError(error))
   }
 })
 
-// Get Firefox processes (structured output)
+// Read per-process detail from /proc (no shell — direct file reads)
+async function readProcDetail(pid) {
+  const detail = {}
+  try {
+    const status = await readFile(`/proc/${pid}/status`, 'utf-8')
+    const get = (key) => {
+      const m = status.match(new RegExp(`^${key}:\\s*(.+)`, 'm'))
+      return m ? m[1].trim() : null
+    }
+    detail.threads = parseInt(get('Threads')) || 1
+    detail.state = get('State') || 'unknown'
+    detail.vmPeakKb = parseInt(get('VmPeak')) || 0
+    detail.vmSizeKb = parseInt(get('VmSize')) || 0
+    detail.voluntaryCtxSwitches = parseInt(get('voluntary_ctxt_switches')) || 0
+    detail.nonvoluntaryCtxSwitches = parseInt(get('nonvoluntary_ctxt_switches')) || 0
+  } catch { /* process may have exited */ }
+
+  try {
+    const io = await readFile(`/proc/${pid}/io`, 'utf-8')
+    const ioGet = (key) => {
+      const m = io.match(new RegExp(`^${key}:\\s*(\\d+)`, 'm'))
+      return m ? parseInt(m[1]) : 0
+    }
+    detail.ioReadBytes = ioGet('read_bytes')
+    detail.ioWriteBytes = ioGet('write_bytes')
+    detail.ioSyscallsR = ioGet('syscr')
+    detail.ioSyscallsW = ioGet('syscw')
+  } catch { detail.ioReadBytes = 0; detail.ioWriteBytes = 0 }
+
+  try {
+    const fds = await readdir(`/proc/${pid}/fd`)
+    detail.fdCount = fds.length
+  } catch { detail.fdCount = 0 }
+
+  try {
+    detail.oomScore = parseInt(await readFile(`/proc/${pid}/oom_score`, 'utf-8')) || 0
+  } catch { detail.oomScore = 0 }
+
+  try {
+    const smaps = await readFile(`/proc/${pid}/smaps_rollup`, 'utf-8')
+    const smGet = (key) => {
+      const m = smaps.match(new RegExp(`^${key}:\\s*(\\d+)`, 'm'))
+      return m ? parseInt(m[1]) : 0
+    }
+    detail.pssKb = smGet('Pss')
+    detail.sharedCleanKb = smGet('Shared_Clean')
+    detail.privateCleanKb = smGet('Private_Clean')
+    detail.privateDirtyKb = smGet('Private_Dirty')
+  } catch { detail.pssKb = 0 }
+
+  try {
+    const env = await readFile(`/proc/${pid}/environ`, 'utf-8')
+    const vars = env.split('\0').filter(v =>
+      /^(MOZ_|DISPLAY|WAYLAND|XDG_SESSION_TYPE|MESA|LIBVA|GDK_BACKEND)/.test(v)
+    )
+    detail.envVars = vars.slice(0, 15)
+  } catch { detail.envVars = [] }
+
+  try {
+    const cgroup = await readFile(`/proc/${pid}/cgroup`, 'utf-8')
+    detail.cgroup = cgroup.trim().split('\n')[0] || ''
+  } catch { detail.cgroup = '' }
+
+  return detail
+}
+
+// Get Firefox processes (structured output with rich detail)
 app.get('/api/processes', async (req, res) => {
   try {
-    const { stdout } = await execAsync(
-      `ps -eo pid,pcpu,pmem,rss,args --no-headers | grep '[/]usr/lib64/firefox/' | head -n 30`
+    const { stdout } = await execFileAsync(
+      'ps', ['-eo', 'pid,pcpu,pmem,rss,nlwp,stat,etimes,args', '--no-headers'], { timeout: 3000 }
     )
-    const lines = stdout.trim().split('\n').filter(line => line.length > 0)
-    const processes = lines.map(line => {
+    const lines = stdout.trim().split('\n')
+      .filter(line => line.includes('/usr/lib64/firefox/') || line.includes('/usr/lib/firefox/'))
+      .slice(0, 30)
+    const processes = await Promise.all(lines.map(async line => {
       const parts = line.trim().split(/\s+/)
-      if (parts.length < 5) return null
+      if (parts.length < 8) return null
       const pid = parseInt(parts[0])
       const cpu = parseFloat(parts[1]) || 0
       const mem = parseFloat(parts[2]) || 0
       const rss = parseInt(parts[3]) || 0
-      const args = parts.slice(4).join(' ')
-      // Extract process type from last argument
+      const threads = parseInt(parts[4]) || 1
+      const stat = parts[5] || ''
+      const uptimeSec = parseInt(parts[6]) || 0
+      const args = parts.slice(7).join(' ')
       const lastArg = parts[parts.length - 1]
       const knownTypes = ['tab', 'socket', 'rdd', 'utility', 'forkserver']
       const type = knownTypes.includes(lastArg) ? lastArg
         : args.includes('crashhelper') ? 'crashhelper'
         : !args.includes('-contentproc') ? 'main'
         : 'content'
-      return { pid, cpu, mem, rss, type, args }
-    }).filter(Boolean)
-    res.json(processes)
+
+      // Read /proc detail in parallel (non-blocking, best-effort)
+      const detail = await readProcDetail(pid)
+
+      return { pid, cpu, mem, rss, threads, stat, uptimeSec, type, args, detail }
+    }))
+    res.json(processes.filter(Boolean))
   } catch (error) {
     res.json([])
   }
 })
 
-// Get MOZ_LOG logs
+// Get MOZ_LOG logs (read file directly — no shell)
 app.get('/api/logs', async (req, res) => {
   try {
     const logFile = `${STATE_DIR}/mozlog_graphics.txt`
     if (!existsSync(logFile)) {
       return res.json([])
     }
-    
-    const { stdout } = await execAsync(`grep -i "wait\\|delay\\|flush" "${logFile}" | tail -n 10`)
-    const logs = stdout.trim().split('\n').filter(line => line.length > 0)
+
+    const content = await readFile(logFile, 'utf-8')
+    const logs = content.split('\n')
+      .filter(line => /wait|delay|flush/i.test(line))
+      .slice(-10)
     res.json(logs)
   } catch (error) {
     res.json([])
   }
 })
-
-// Backup user.js before writing (inspired by arkenfox updater)
-async function backupUserJs(userJsFile) {
-  if (existsSync(userJsFile)) {
-    const backupFile = `${userJsFile}.backup`
-    await copyFile(userJsFile, backupFile)
-    return backupFile
-  }
-  return null
-}
 
 // Generate default user.js template from PREF_CATEGORIES
 function generateTemplate() {
@@ -527,14 +680,22 @@ function generateTemplate() {
   return lines.join('\n')
 }
 
-// Apply preferences to user.js
+// Apply preferences to user.js (with Firefox running check + backup rotation)
 app.post('/api/apply-preferences', async (req, res) => {
   try {
+    if (await isFirefoxRunning()) {
+      return res.status(409).json({ error: 'Close Firefox before modifying user.js — profile is locked while running' })
+    }
+
     const { preferences } = req.body
+    if (!preferences || typeof preferences !== 'object') {
+      return res.status(400).json({ error: 'Preferences object required' })
+    }
+
     const profilePath = await resolveProfile()
     const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
 
-    const backupPath = await backupUserJs(userJsFile)
+    const backupPath = await rotateBackups(userJsFile)
 
     let content = ''
     if (existsSync(userJsFile)) {
@@ -546,7 +707,6 @@ app.post('/api/apply-preferences', async (req, res) => {
       const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       const regex = new RegExp(`user_pref\\("${escaped}",\\s*[^)]+\\)`)
       if (regex.test(content)) {
-        // Update existing preference
         content = content.replace(regex, `user_pref("${key}", ${value})`)
         updated = true
       } else if (!content.includes(`user_pref("${key}"`)) {
@@ -558,14 +718,14 @@ app.post('/api/apply-preferences', async (req, res) => {
     if (updated) {
       await writeFile(userJsFile, content)
       const msg = backupPath
-        ? `Preferences applied! Backup saved to ${backupPath}. Restart Firefox to apply.`
+        ? 'Preferences applied! Backup created. Restart Firefox to apply.'
         : 'Preferences applied! Restart Firefox to apply changes.'
       res.json({ message: msg })
     } else {
       res.json({ message: 'All preferences already present in user.js' })
     }
   } catch (error) {
-    res.status(500).json({ error: error.message })
+    res.status(500).json(safeError(error))
   }
 })
 
@@ -582,55 +742,70 @@ app.get('/api/user-js', async (req, res) => {
     const content = await readFile(userJsFile, 'utf-8')
     res.json({ content, path: userJsFile, isTemplate: false })
   } catch (error) {
-    res.status(500).json({ error: error.message })
+    res.status(500).json(safeError(error))
   }
 })
 
-// Save user.js content (with backup and validation)
+// Save user.js content (with validation, Firefox check, backup rotation)
 app.post('/api/user-js', async (req, res) => {
   try {
-    const { content } = req.body
+    if (await isFirefoxRunning()) {
+      return res.status(409).json({ error: 'Close Firefox before modifying user.js — profile is locked while running' })
+    }
 
-    if (typeof content !== 'string') {
-      return res.status(400).json({ error: 'Content must be a string' })
+    const { content } = req.body
+    const validation = validateUserJS(content)
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.reason })
     }
 
     const profilePath = await resolveProfile()
     const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
 
-    const backupPath = await backupUserJs(userJsFile)
+    const backupPath = await rotateBackups(userJsFile)
 
     await writeFile(userJsFile, content, 'utf-8')
     const msg = backupPath
-      ? `user.js saved! Backup at ${backupPath}. Restart Firefox to apply.`
+      ? 'user.js saved! Backup created. Restart Firefox to apply.'
       : 'user.js saved successfully! Restart Firefox to apply changes.'
     res.json({ message: msg, path: userJsFile })
   } catch (error) {
-    res.status(500).json({ error: error.message })
+    res.status(500).json(safeError(error))
   }
 })
 
-// Restore user.js from backup
+// Restore user.js from most recent backup
 app.post('/api/user-js/restore', async (req, res) => {
   try {
     const profilePath = await resolveProfile()
     const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`
-    const backupFile = `${userJsFile}.backup`
+    const dir = path.dirname(userJsFile)
+    const base = path.basename(userJsFile)
 
-    if (!existsSync(backupFile)) {
+    // Find the most recent backup (supports both old .backup and new timestamped format)
+    const files = await readdir(dir)
+    const backups = files
+      .filter(f => f === `${base}.backup` || f.startsWith(`${base}.backup-`))
+      .sort()
+      .reverse()
+
+    if (backups.length === 0) {
       return res.status(404).json({ error: 'No backup file found' })
     }
 
-    await copyFile(backupFile, userJsFile)
+    const latestBackup = path.join(dir, backups[0])
+    await copyFile(latestBackup, userJsFile)
     const content = await readFile(userJsFile, 'utf-8')
-    res.json({ message: 'Restored from backup! Restart Firefox to apply.', content })
+    res.json({ message: `Restored from ${backups[0]}! Restart Firefox to apply.`, content })
   } catch (error) {
-    res.status(500).json({ error: error.message })
+    res.status(500).json(safeError(error))
   }
 })
 
+// === START SERVER (LOCALHOST ONLY — OWASP: bind to loopback) ===
 const PORT = 3001
-app.listen(PORT, () => {
-  console.log(`Firefox Performance Tuner API running on http://localhost:${PORT}`)
+const HOST = '127.0.0.1'
+app.listen(PORT, HOST, () => {
+  console.log(`Firefox Performance Tuner API running on http://${HOST}:${PORT}`)
 })
 

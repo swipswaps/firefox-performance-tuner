@@ -28,6 +28,7 @@ function App() {
   const [confirmAction, setConfirmAction] = useState(null)
   const [benchmark, setBenchmark] = useState(null)
   const [benchLoading, setBenchLoading] = useState(false)
+  const [apiMode, setApiMode] = useState('checking') // 'full' | 'demo' | 'disconnected' | 'checking'
 
   const fetchData = useCallback(async (url, setter, label) => {
     try {
@@ -40,16 +41,40 @@ function App() {
     }
   }, [])
 
+  const checkApiMode = useCallback(async () => {
+    // Detect if we're on GitHub Pages (static demo — no API)
+    if (window.location.hostname.includes('github.io')) {
+      setApiMode('demo')
+      return 'demo'
+    }
+    try {
+      const res = await fetch('/api/health')
+      if (res.ok) {
+        const data = await res.json()
+        setApiMode(data.mode || 'full')
+        return data.mode || 'full'
+      }
+      setApiMode('disconnected')
+      return 'disconnected'
+    } catch {
+      setApiMode('disconnected')
+      return 'disconnected'
+    }
+  }, [])
+
   const fetchAll = useCallback(async () => {
-    await Promise.all([
-      fetchData('/api/system-info', setSystemInfo, 'system info'),
-      fetchData('/api/preferences', setPreferences, 'preferences'),
-      fetchData('/api/pref-categories', setPrefCategories, 'categories'),
-      fetchData('/api/processes', setProcesses, 'processes'),
-      fetchData('/api/logs', setLogs, 'logs'),
-    ])
+    const mode = await checkApiMode()
+    if (mode === 'full') {
+      await Promise.all([
+        fetchData('/api/system-info', setSystemInfo, 'system info'),
+        fetchData('/api/preferences', setPreferences, 'preferences'),
+        fetchData('/api/pref-categories', setPrefCategories, 'categories'),
+        fetchData('/api/processes', setProcesses, 'processes'),
+        fetchData('/api/logs', setLogs, 'logs'),
+      ])
+    }
     setLoading(false)
-  }, [fetchData])
+  }, [fetchData, checkApiMode])
 
   const getCriticalPrefs = () => {
     const flat = {}
@@ -147,6 +172,13 @@ function App() {
         </div>
         <p className="header-subtitle">Real-time monitoring and optimization for Firefox on X11 + Mesa</p>
       </header>
+
+      {apiMode !== 'full' && apiMode !== 'checking' && (
+        <div className={`mode-banner mode-${apiMode}`}>
+          {apiMode === 'demo' && '📺 DEMO MODE — Static preview on GitHub Pages. Run locally with `npm start` for full features.'}
+          {apiMode === 'disconnected' && '⚠️ API DISCONNECTED — Backend server is not running. Start with `npm start` to enable all features.'}
+        </div>
+      )}
 
       <nav className="tab-nav">
         {TABS.map(tab => (
