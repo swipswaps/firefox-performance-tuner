@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { generateFullSetupScript, generateProfileFindScript, generateRestartScript, copyToClipboard } from '../utils/clipboard'
+import { generateFullSetupScript, generateProfileFindScript, generateRestartScript, generateRecoveryScript, copyToClipboard } from '../utils/clipboard'
 import CopyButton from './CopyButton'
 import './ConfigWizard.css'
 
@@ -116,18 +116,31 @@ export default function ConfigWizard({ systemInfo, userJsContent, showToast, onC
         'Copy the complete setup script',
         'Paste into terminal and run',
         'The script will automatically find your profile, create a backup, and apply changes',
-        'Firefox will restart automatically'
+        'Script includes self-healing verification - auto-rolls back if Firefox fails to start'
       ]
     },
     {
       id: 3,
       title: '✅ Verify & Restart',
-      description: 'If Firefox didn\'t restart automatically, use this command.',
+      description: 'Restart Firefox with automatic verification. If Firefox fails to start, the script will show recovery instructions.',
       script: generateRestartScript(),
       instructions: [
         'Copy the restart script',
-        'Run in terminal if Firefox is still open',
-        'Check about:config in Firefox to verify preferences were applied'
+        'Run in terminal',
+        'Script will verify Firefox starts successfully',
+        'If Firefox crashes, recovery instructions will be shown automatically'
+      ]
+    },
+    {
+      id: 4,
+      title: '🆘 Emergency Recovery',
+      description: 'If Firefox won\'t start or is unstable, use this interactive recovery script.',
+      script: generateRecoveryScript(),
+      instructions: [
+        'Copy the recovery script',
+        'Run in terminal',
+        'Script will list all available backups',
+        'Choose option to restore, delete user.js, or start in Safe Mode'
       ]
     }
   ]
@@ -154,6 +167,20 @@ export default function ConfigWizard({ systemInfo, userJsContent, showToast, onC
               <div className="wizard-step">
                 <h3>📋 Step 1: Preview Changes</h3>
                 <p>Review what will change before applying configuration.</p>
+
+                <div className="wizard-safety-notice">
+                  <h4>🛡️ Safety First!</h4>
+                  <p>Before applying any configuration, save the emergency recovery script:</p>
+                  <CopyButton
+                    text={generateEmergencyRecoveryScript()}
+                    label="📥 Copy Emergency Recovery Script"
+                    showToast={showToast}
+                  />
+                  <p className="wizard-safety-tip">
+                    💡 Save this script to a file (e.g., <code>firefox-recovery.sh</code>) and make it executable with <code>chmod +x firefox-recovery.sh</code>
+                  </p>
+                </div>
+
                 <button
                   className="wizard-btn-primary"
                   onClick={previewDiff}
@@ -205,6 +232,20 @@ export default function ConfigWizard({ systemInfo, userJsContent, showToast, onC
                 <h3>✅ Configuration Applied</h3>
                 <p>Configuration has been applied with backup created.</p>
                 <p className="wizard-warning">⚠️ Restart Firefox to apply changes</p>
+
+                <div className="wizard-recovery-info">
+                  <h4>🛡️ Recovery Options (if Firefox won't start):</h4>
+                  <ol>
+                    <li><strong>Use Rollback button below</strong> - Restores previous config</li>
+                    <li><strong>Manual restore:</strong> <code>cp {profile}/user.js.backup.1 {profile}/user.js</code></li>
+                    <li><strong>Delete user.js:</strong> <code>rm {profile}/user.js</code></li>
+                    <li><strong>Safe Mode:</strong> <code>firefox --safe-mode</code></li>
+                  </ol>
+                  <p className="wizard-recovery-note">
+                    💡 Backups are kept at: <code>{profile}/user.js.backup.1</code> through <code>.backup.5</code>
+                  </p>
+                </div>
+
                 <div className="wizard-actions">
                   <button
                     className="wizard-btn-secondary"

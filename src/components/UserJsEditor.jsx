@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import CopyButton from './CopyButton'
 import ConfigWizard from './ConfigWizard'
-import { generateUserJsScript, generateRestartScript } from '../utils/clipboard'
+import { generateUserJsScript, generateRestartScript, generateEmergencyRecoveryScript } from '../utils/clipboard'
 import './UserJsEditor.css'
 
 function UserJsEditor({ showToast, systemInfo, apiMode }) {
@@ -131,6 +131,12 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
             >
               🧙 Setup Wizard
             </button>
+            <CopyButton
+              text={generateEmergencyRecoveryScript()}
+              label="🚨 Emergency Recovery"
+              showToast={notify}
+              title="Copy emergency recovery script (save before applying changes)"
+            />
             <CopyButton
               text={generateUserJsScript(content, true)}
               label="📋 Copy Setup Script"

@@ -236,19 +236,78 @@ function safeError(error) {
   return { error: msg.length > 200 ? 'Operation failed' : msg }
 }
 
-// Validate user.js content — only allow user_pref() lines, comments, and blanks
+/**
+ * Validate user.js content with corruption prevention
+ * Checks for:
+ * - Syntax errors that could break Firefox startup
+ * - Balanced quotes and parentheses
+ * - Valid user_pref() calls only
+ * - No shell injection attempts
+ * - No dangerous characters
+ */
 function validateUserJS(content) {
   if (typeof content !== 'string') return { valid: false, reason: 'Content must be a string' }
   if (content.length > 512 * 1024) return { valid: false, reason: 'Content too large (max 512KB)' }
 
+  // Check for null bytes or control characters (except newline, tab, carriage return)
+  if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(content)) {
+    return { valid: false, reason: 'Content contains invalid control characters' }
+  }
+
+  // Check for balanced quotes and parentheses
+  let quoteCount = 0
+  let parenDepth = 0
+  for (let i = 0; i < content.length; i++) {
+    const char = content[i]
+    const prevChar = i > 0 ? content[i - 1] : ''
+
+    if (char === '"' && prevChar !== '\\') quoteCount++
+    if (char === '(') parenDepth++
+    if (char === ')') parenDepth--
+
+    if (parenDepth < 0) {
+      return { valid: false, reason: 'Unbalanced parentheses (too many closing)' }
+    }
+  }
+
+  if (quoteCount % 2 !== 0) {
+    return { valid: false, reason: 'Unbalanced quotes - this will corrupt Firefox profile' }
+  }
+
+  if (parenDepth !== 0) {
+    return { valid: false, reason: 'Unbalanced parentheses - this will corrupt Firefox profile' }
+  }
+
+  // Validate each line
   const lines = content.split('\n')
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim()
-    if (line === '' || line.startsWith('//')) continue
-    if (!/^user_pref\("[-a-zA-Z0-9._]+",\s*(true|false|-?\d+|"[^"]*")\);$/.test(line)) {
-      return { valid: false, reason: `Invalid syntax on line ${i + 1}: ${line.substring(0, 80)}` }
+
+    // Allow empty lines and comments
+    if (line === '' || line.startsWith('//') || line.startsWith('/*') || line.startsWith('*') || line === '*/') {
+      continue
+    }
+
+    // Must be valid user_pref() call
+    // Format: user_pref("pref.name", value);
+    // Value can be: true, false, number, or "string"
+    if (!/^user_pref\("[-a-zA-Z0-9._]+",\s*(true|false|-?\d+(\.\d+)?|"[^"]*")\);$/.test(line)) {
+      return {
+        valid: false,
+        reason: `Invalid syntax on line ${i + 1}: ${line.substring(0, 80)}...\nMust be: user_pref("pref.name", value);`
+      }
+    }
+
+    // Check for shell injection attempts in pref names
+    const prefNameMatch = line.match(/user_pref\("([^"]+)"/)
+    if (prefNameMatch) {
+      const prefName = prefNameMatch[1]
+      if (/[;&|`$(){}[\]<>]/.test(prefName)) {
+        return { valid: false, reason: `Dangerous characters in pref name on line ${i + 1}` }
+      }
     }
   }
+
   return { valid: true }
 }
 

@@ -286,3 +286,123 @@
   font-weight: 500;
 }
 
+.wizard-recovery-info {
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: 6px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.wizard-recovery-info h4 {
+  margin: 0 0 12px 0;
+  color: #ef4444;
+  font-size: 0.95rem;
+}
+
+.wizard-recovery-info ol {
+  margin: 0 0 12px 0;
+  padding-left: 20px;
+  color: #ccc;
+}
+
+.wizard-recovery-info li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.wizard-recovery-info code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #fbbf24;
+}
+
+.wizard-recovery-note {
+  margin: 12px 0 0 0;
+  padding: 8px;
+  background: rgba(74, 158, 255, 0.05);
+  border-left: 3px solid #4a9eff;
+  color: #aaa;
+  font-size: 0.85rem;
+}
+
+.wizard-safety-notice {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.wizard-safety-notice h4 {
+  margin: 0 0 8px 0;
+  color: #ef4444;
+  font-size: 1rem;
+}
+
+.wizard-safety-notice p {
+  margin: 8px 0;
+  color: #ccc;
+  font-size: 0.9rem;
+}
+
+.wizard-safety-tip {
+  font-size: 0.85rem !important;
+  color: #999 !important;
+  font-style: italic;
+}
+
+.wizard-safety-tip code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #b0c4de;
+}
+
+.wizard-recovery-info {
+  background: rgba(74, 158, 255, 0.05);
+  border: 1px solid rgba(74, 158, 255, 0.2);
+  border-radius: 6px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.wizard-recovery-info h4 {
+  margin: 0 0 12px 0;
+  color: #4a9eff;
+  font-size: 0.95rem;
+}
+
+.wizard-recovery-info ol {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: #ccc;
+}
+
+.wizard-recovery-info li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.wizard-recovery-info code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #b0c4de;
+}
+
+.wizard-recovery-note {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(74, 158, 255, 0.2);
+  font-size: 0.85rem;
+  color: #999;
+}
+
