@@ -7,6 +7,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
+import { diffLines } from 'diff'
 
 const execFileAsync = promisify(execFile)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -797,6 +798,159 @@ app.post('/api/user-js/restore', async (req, res) => {
     await copyFile(latestBackup, userJsFile)
     const content = await readFile(userJsFile, 'utf-8')
     res.json({ message: `Restored from ${backups[0]}! Restart Firefox to apply.`, content })
+  } catch (error) {
+    res.status(500).json(safeError(error))
+  }
+})
+
+// === ZERO-MISTAKE CONFIGURATION WIZARD ENDPOINTS ===
+// Production-grade wizard with robust profile detection, diff preview, rollback
+
+/**
+ * Detect Firefox profile with support for normal/Flatpak/Snap installs
+ * Returns absolute path to profile directory
+ */
+async function detectProfileRobust() {
+  const candidates = [
+    `${process.env.HOME}/.mozilla/firefox`,
+    `${process.env.HOME}/.var/app/org.mozilla.firefox/.mozilla/firefox`,
+    `${process.env.HOME}/snap/firefox/common/.mozilla/firefox`
+  ]
+
+  for (const base of candidates) {
+    const iniPath = `${base}/profiles.ini`
+    if (!existsSync(iniPath)) continue
+
+    try {
+      const iniContent = await readFile(iniPath, 'utf8')
+      const lines = iniContent.split('\n')
+
+      let currentPath = null
+      for (const line of lines) {
+        if (line.startsWith('Path=')) {
+          currentPath = line.split('=')[1].trim()
+        }
+        if (line.startsWith('Default=1') && currentPath) {
+          const fullPath = `${base}/${currentPath}`
+          if (existsSync(fullPath)) {
+            return fullPath
+          }
+        }
+      }
+    } catch (err) {
+      continue
+    }
+  }
+
+  throw new Error('No Firefox profile found (checked normal, Flatpak, Snap)')
+}
+
+// Step 1: Detect profile and verify prefs.js exists
+app.get('/api/wizard/profile', async (_req, res) => {
+  try {
+    const profilePath = await detectProfileRobust()
+    const prefsPath = `${profilePath}/prefs.js`
+    const userJsPath = `${profilePath}/user.js`
+
+    res.json({
+      profile: profilePath,
+      prefsExists: existsSync(prefsPath),
+      userJsExists: existsSync(userJsPath),
+      firefoxRunning: await isFirefoxRunning()
+    })
+  } catch (error) {
+    res.status(404).json({ error: error.message })
+  }
+})
+
+// Step 2: Generate diff preview (current vs new user.js)
+app.post('/api/wizard/diff', async (req, res) => {
+  try {
+    const { newContent } = req.body
+
+    if (typeof newContent !== 'string' || newContent.length > 512 * 1024) {
+      return res.status(400).json({ error: 'Invalid content (max 512KB)' })
+    }
+
+    const profilePath = await detectProfileRobust()
+    const userJsPath = `${profilePath}/user.js`
+
+    let currentContent = ''
+    if (existsSync(userJsPath)) {
+      currentContent = await readFile(userJsPath, 'utf8')
+    }
+
+    const diff = diffLines(currentContent, newContent)
+
+    res.json({
+      diff,
+      currentSize: currentContent.length,
+      newSize: newContent.length,
+      hasChanges: diff.some(part => part.added || part.removed)
+    })
+  } catch (error) {
+    res.status(500).json(safeError(error))
+  }
+})
+
+// Step 3: Apply configuration safely (with Firefox check + rotating backups)
+app.post('/api/wizard/apply', async (req, res) => {
+  try {
+    if (await isFirefoxRunning()) {
+      return res.status(409).json({
+        error: 'Firefox is running',
+        message: 'Close Firefox before applying configuration'
+      })
+    }
+
+    const { newContent } = req.body
+
+    if (typeof newContent !== 'string' || newContent.length > 512 * 1024) {
+      return res.status(400).json({ error: 'Invalid content (max 512KB)' })
+    }
+
+    if (!validateUserJS(newContent)) {
+      return res.status(400).json({ error: 'Invalid user.js content (failed validation)' })
+    }
+
+    const profilePath = await detectProfileRobust()
+    const userJsPath = `${profilePath}/user.js`
+
+    // Rotate backups (keep last 5)
+    await rotateBackups(userJsPath)
+
+    // Write new user.js
+    await writeFile(userJsPath, newContent, 'utf8')
+
+    res.json({
+      success: true,
+      path: userJsPath,
+      backupCreated: existsSync(`${userJsPath}.backup.1`)
+    })
+  } catch (error) {
+    res.status(500).json(safeError(error))
+  }
+})
+
+// Step 4: Rollback to most recent backup
+app.post('/api/wizard/rollback', async (_req, res) => {
+  try {
+    const profilePath = await detectProfileRobust()
+    const userJsPath = `${profilePath}/user.js`
+    const backupPath = `${userJsPath}.backup.1`
+
+    if (!existsSync(backupPath)) {
+      return res.status(404).json({ error: 'No backup available' })
+    }
+
+    await copyFile(backupPath, userJsPath)
+
+    res.json({
+      success: true,
+      restored: true,
+      path: userJsPath,
+      backupUsed: backupPath
+    })
   } catch (error) {
     res.status(500).json(safeError(error))
   }

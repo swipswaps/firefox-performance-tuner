@@ -6,6 +6,8 @@ import LogViewer from './components/LogViewer'
 import UserJsEditor from './components/UserJsEditor'
 import ToastContainer, { showToast } from './components/Toast'
 import StatusBadge from './components/StatusBadge'
+import CopyButton from './components/CopyButton'
+import { generatePreferenceScript } from './utils/clipboard'
 import './App.css'
 
 const TABS = [
@@ -264,14 +266,22 @@ function App() {
               <p style={{ color: '#888', marginBottom: '12px', fontSize: '0.9rem' }}>
                 Detect your system capabilities and get tailored Firefox optimization recommendations.
               </p>
-              <button
-                className="btn-apply"
-                onClick={runBenchmark}
-                disabled={benchLoading}
-                style={{ marginBottom: '16px' }}
-              >
-                {benchLoading ? '⏳ Running...' : '🚀 Run Benchmark'}
-              </button>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                <button
+                  className="btn-apply"
+                  onClick={runBenchmark}
+                  disabled={benchLoading}
+                >
+                  {benchLoading ? '⏳ Running...' : '🚀 Run Benchmark'}
+                </button>
+                {Object.keys(prefCategories).length > 0 && (
+                  <CopyButton
+                    text={generatePreferenceScript(getCriticalPrefs())}
+                    label="📦 Export Configuration"
+                    showToast={showToast}
+                  />
+                )}
+              </div>
 
               {benchmark && (
                 <div className="bench-results">
@@ -338,7 +348,7 @@ function App() {
         )}
 
         {activeTab === 'editor' && (
-          <UserJsEditor showToast={showToast} />
+          <UserJsEditor showToast={showToast} systemInfo={systemInfo} apiMode={apiMode} />
         )}
 
         {activeTab === 'monitor' && (

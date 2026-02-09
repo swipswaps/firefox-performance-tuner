@@ -40,10 +40,42 @@
   font-size: 0.9rem;
 }
 
+.demo-mode-banner {
+  background: rgba(255, 193, 7, 0.1);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.demo-mode-banner span {
+  color: #ffc107;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.demo-mode-banner p {
+  margin: 0;
+  color: #ccc;
+  font-size: 0.85rem;
+}
+
 .editor-controls {
   display: flex;
+  justify-content: space-between;
   gap: 0.5rem;
   margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.editor-controls-left,
+.editor-controls-right {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 .editor-controls button {
@@ -76,6 +108,17 @@
 .editor-controls .save-button:hover:not(:disabled) {
   background: #22c55e;
   border-color: #22c55e;
+}
+
+.wizard-button {
+  background: rgba(147, 51, 234, 0.2) !important;
+  border-color: rgba(147, 51, 234, 0.5) !important;
+  color: #a78bfa !important;
+}
+
+.wizard-button:hover:not(:disabled) {
+  background: rgba(147, 51, 234, 0.3) !important;
+  border-color: rgba(147, 51, 234, 0.7) !important;
 }
 
 .editor-message {
@@ -123,16 +166,26 @@
   margin-top: 1rem;
   padding-top: 1rem;
   border-top: 1px solid #444;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
-.editor-footer p {
+.editor-footer-info p {
   margin: 0;
   color: #fbbf24;
   font-size: 0.9rem;
   line-height: 1.6;
 }
 
-.editor-footer strong {
+.editor-footer-info strong {
   color: #fbbf24;
+}
+
+.editor-footer-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
