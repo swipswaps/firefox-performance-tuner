@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { generateFullSetupScript, generateProfileFindScript, generateRestartScript, generateRecoveryScript, copyToClipboard } from '../utils/clipboard'
+import { generateFullSetupScript, generateProfileFindScript, generateRestartScript, generateRecoveryScript, generateEmergencyRecoveryScript, copyToClipboard } from '../utils/clipboard'
 import CopyButton from './CopyButton'
 import './ConfigWizard.css'
 
@@ -97,50 +97,50 @@ export default function ConfigWizard({ systemInfo, userJsContent, showToast, onC
   const steps = [
     {
       id: 1,
-      title: '🔍 Find Your Firefox Profile',
-      description: 'First, we need to locate your Firefox profile directory.',
+      title: '🔍 Step 1: Verify Your Firefox Profile',
+      description: 'This script checks that your Firefox profile exists and is ready for configuration. It detects normal, Flatpak, and Snap installs automatically. Run it first to confirm everything looks right.',
       script: generateProfileFindScript(),
       instructions: [
-        'Copy the script below',
-        'Open a terminal',
-        'Paste and run the script',
-        'Note the profile path shown'
+        'Copy the script below and paste it into a terminal',
+        'It will print your Firefox profile path (e.g. ~/.mozilla/firefox/abc123.default)',
+        'If it says "Firefox is running", close Firefox first',
+        'If it says "prefs.js not found", the profile may be invalid — try launching Firefox once first'
       ]
     },
     {
       id: 2,
-      title: '📝 Apply Configuration',
-      description: 'This script will backup your current user.js (if it exists) and apply the new configuration.',
+      title: '📝 Step 2: Apply Configuration',
+      description: 'This all-in-one script does everything: finds your profile, creates a rotating backup of your existing user.js (keeps last 5), writes the new configuration, and verifies Firefox starts correctly. If Firefox crashes after applying, it automatically rolls back.',
       script: generateFullSetupScript(systemInfo, {}, userJsContent),
       instructions: [
-        'Copy the complete setup script',
-        'Paste into terminal and run',
-        'The script will automatically find your profile, create a backup, and apply changes',
-        'Script includes self-healing verification - auto-rolls back if Firefox fails to start'
+        'Close Firefox completely before running',
+        'Copy the script and paste it into a terminal',
+        'The script will show exactly what it\'s doing at each step',
+        'If anything goes wrong, your original config is preserved in the backup'
       ]
     },
     {
       id: 3,
-      title: '✅ Verify & Restart',
-      description: 'Restart Firefox with automatic verification. If Firefox fails to start, the script will show recovery instructions.',
+      title: '✅ Step 3: Verify & Restart',
+      description: 'Only needed if Step 2 didn\'t restart Firefox automatically. This script closes Firefox, restarts it, and watches for crashes. If Firefox fails to start, it shows exactly what to do.',
       script: generateRestartScript(),
       instructions: [
-        'Copy the restart script',
-        'Run in terminal',
-        'Script will verify Firefox starts successfully',
-        'If Firefox crashes, recovery instructions will be shown automatically'
+        'Copy and run in terminal',
+        'Wait for "Firefox started successfully" confirmation',
+        'If you see "EMERGENCY RECOVERY" instructions, follow them — your backup is safe'
       ]
     },
     {
       id: 4,
-      title: '🆘 Emergency Recovery',
-      description: 'If Firefox won\'t start or is unstable, use this interactive recovery script.',
+      title: '🆘 Emergency Recovery (if needed)',
+      description: 'Use this only if Firefox won\'t start or behaves badly after applying configuration. It lists all your backups and lets you restore any of them, delete user.js entirely, or start Firefox in Safe Mode.',
       script: generateRecoveryScript(),
       instructions: [
-        'Copy the recovery script',
-        'Run in terminal',
-        'Script will list all available backups',
-        'Choose option to restore, delete user.js, or start in Safe Mode'
+        'Copy and run in terminal — it\'s interactive and will guide you',
+        'Option 1: Restore from most recent backup (recommended)',
+        'Option 2: View backup contents before restoring',
+        'Option 3: Delete user.js entirely (Firefox uses built-in defaults)',
+        'Option 4: Start Firefox in Safe Mode for troubleshooting'
       ]
     }
   ]
@@ -273,9 +273,16 @@ export default function ConfigWizard({ systemInfo, userJsContent, showToast, onC
     <div className="wizard-overlay" onClick={onClose}>
       <div className="wizard-dialog" onClick={e => e.stopPropagation()}>
         <div className="wizard-header">
-          <h2>🧙 Configuration Wizard (DEMO Mode)</h2>
+          <h2>🧙 Configuration Wizard</h2>
           <button className="wizard-close" onClick={onClose}>×</button>
         </div>
+
+        <p className="wizard-intro">
+          Each step below gives you a self-contained shell script to copy and run in your terminal.
+          Scripts auto-detect your Firefox profile, create backups, and include safety checks.
+          {step === 2 && ' Step 2 is the main one — it does everything in a single script.'}
+          {step === 4 && ' Use this only if something went wrong.'}
+        </p>
 
         <div className="wizard-progress">
           {steps.map(s => (
@@ -294,7 +301,7 @@ export default function ConfigWizard({ systemInfo, userJsContent, showToast, onC
           <p className="wizard-description">{currentStep.description}</p>
 
           <div className="wizard-instructions">
-            <h4>Instructions:</h4>
+            <h4>What to do:</h4>
             <ol>
               {currentStep.instructions.map((inst, i) => (
                 <li key={i}>{inst}</li>
@@ -304,10 +311,10 @@ export default function ConfigWizard({ systemInfo, userJsContent, showToast, onC
 
           <div className="wizard-script">
             <div className="wizard-script-header">
-              <span>📋 Script</span>
+              <span>📋 Script — copy and paste into terminal</span>
               <CopyButton
                 text={currentStep.script}
-                label="Copy Script"
+                label="📋 Copy to Clipboard"
                 showToast={showToast}
                 small
               />

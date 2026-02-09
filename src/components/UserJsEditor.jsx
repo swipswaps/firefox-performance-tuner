@@ -95,8 +95,8 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
 
         {isDemoMode && (
           <div className="demo-mode-banner">
-            <span>📺 DEMO MODE</span>
-            <p>API not available. Use clipboard buttons below to apply configuration manually.</p>
+            <span>📋 Clipboard Mode</span>
+            <p>Use the <strong>🧙 Setup Wizard</strong> button to get step-by-step scripts you can copy and run in your terminal.</p>
           </div>
         )}
 

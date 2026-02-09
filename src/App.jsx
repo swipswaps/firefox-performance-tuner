@@ -177,7 +177,7 @@ function App() {
 
       {apiMode !== 'full' && apiMode !== 'checking' && (
         <div className={`mode-banner mode-${apiMode}`}>
-          {apiMode === 'demo' && '📺 DEMO MODE — Static preview on GitHub Pages. Run locally with `npm start` for full features.'}
+          {apiMode === 'demo' && '📺 DEMO MODE — Browse preferences and export configuration scripts to your clipboard. Open the Editor tab → Setup Wizard to apply changes.'}
           {apiMode === 'disconnected' && '⚠️ API DISCONNECTED — Backend server is not running. Start with `npm start` to enable all features.'}
         </div>
       )}

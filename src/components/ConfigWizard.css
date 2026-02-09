@@ -59,6 +59,16 @@
   color: #e0e0e0;
 }
 
+.wizard-intro {
+  margin: 0;
+  padding: 12px 24px;
+  color: #9ca3af;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  border-bottom: 1px solid #2a2a2a;
+  background: rgba(59, 130, 246, 0.05);
+}
+
 .wizard-progress {
   display: flex;
   justify-content: center;
