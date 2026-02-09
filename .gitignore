@@ -28,3 +28,18 @@ Thumbs.db
 # Cache
 .cache/
 
+# Debugging artifacts (Augment extension bug-fixing session)
+apply-fix.cjs
+chatlog-*.txt
+chatlog-requests.txt
+cleanup-chain.txt
+extract-*.sh
+fix-extension.sh
+fix-result.txt
+output-paths.txt
+parse-chatlog*.cjs
+pty-binding.txt
+terminal-create.txt
+trace-failure*.sh
+trace-failure*.txt
+

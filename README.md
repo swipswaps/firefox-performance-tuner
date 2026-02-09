@@ -5,7 +5,10 @@ A React-based web application for monitoring and tuning Firefox performance on L
 ## Features
 
 - **Real-time Monitoring**: Live display of Firefox processes, CPU usage, and system metrics
-- **Preference Management**: Automatically detect and apply critical performance preferences
+- **Categorized Preferences**: Preferences organized by category (GPU & Rendering, Process Management, Media & Codecs, Network & Prefetch, Cache & Memory) with descriptions inspired by [Betterfox](https://github.com/nickersoft/betterfox)
+- **user.js Editor**: In-browser editor to load, edit, and save `user.js` with modified indicator
+- **Backup & Restore**: Automatic `.backup` file creation before overwriting `user.js`; one-click restore from backup
+- **Template Generation**: Generates a default `user.js` from categorized preferences when no file exists
 - **GPU Delay Detection**: Monitor MOZ_LOG for GPU threading contention issues
 - **System Information**: Display OpenGL renderer, VA-API status, and session type
 - **Auto-refresh**: Configurable refresh intervals (1s, 5s, 10s)
@@ -78,10 +81,14 @@ The app monitors and applies these critical preferences for X11 + Mesa optimizat
 ## API Endpoints
 
 - `GET /api/system-info` - System graphics information
-- `GET /api/preferences` - Current Firefox preferences
+- `GET /api/preferences` - Current Firefox preferences (reads from `prefs.js`)
+- `GET /api/pref-categories` - Preference categories with descriptions and expected values
 - `GET /api/processes` - Running Firefox processes
 - `GET /api/logs` - MOZ_LOG GPU delay logs
-- `POST /api/apply-preferences` - Apply critical preferences to user.js
+- `POST /api/apply-preferences` - Apply critical preferences to `user.js`
+- `GET /api/user-js` - Get `user.js` content (returns template if file doesn't exist)
+- `POST /api/user-js` - Save `user.js` content (creates backup first)
+- `POST /api/user-js/restore` - Restore `user.js` from backup
 
 ## Requirements
 
