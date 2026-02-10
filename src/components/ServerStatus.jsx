@@ -103,7 +103,7 @@ export default function ServerStatus({ apiMode, onRetry, showToast }) {
         <span className="server-status-icon">{apiMode === "demo" ? "📺" : "⚠️"}</span>
         <span className="server-status-text">
           {apiMode === "demo"
-            ? "Demo Mode — Run locally for full features"
+            ? "Demo Mode — Choose your workflow below"
             : "Backend Not Connected"}
         </span>
         <span className="server-status-expand">{expanded ? "▼" : "▶"}</span>
@@ -117,22 +117,22 @@ export default function ServerStatus({ apiMode, onRetry, showToast }) {
                 <strong>🌐 You&apos;re viewing this on GitHub Pages</strong>
               </p>
               <p>
-                This is a <em>frontend-only</em> demo. To apply Firefox optimizations, run the app
-                locally on your Linux machine.
+                This is a <em>frontend-only</em> demo. To optimize Firefox, go to the <strong>Editor</strong> tab → <strong>Setup Wizard</strong> and copy the scripts. They include automatic backup and recovery.
               </p>
             </div>
           )}
 
           {!isGitHubPages && apiMode === "disconnected" && (
             <p className="server-status-error">
-              Cannot connect to backend on port 3001. Start the server to enable all features.
+              Cannot connect to backend on port 3001. Start the server to enable monitoring and benchmarking.
             </p>
           )}
 
+          {/* Main workflow: Run the app locally for full features */}
           <div className="server-status-quick">
-            <h4>🎯 Quick Setup (one command)</h4>
+            <h4>🚀 Run Full App Locally</h4>
             <p>
-              Open {platform === "windows" ? "PowerShell" : "Terminal"} and paste:
+              Get real-time monitoring, benchmarking, and live preference editing:
             </p>
             <div className="server-status-oneliner">
               <code>{oneLiner}</code>
@@ -141,12 +141,12 @@ export default function ServerStatus({ apiMode, onRetry, showToast }) {
               </button>
             </div>
             <p className="server-status-script-info">
-              This will: clone repo → install dependencies → start backend + frontend
+              Clone repo → install dependencies → start app at localhost:3000
             </p>
           </div>
 
           <details className="server-status-manual">
-            <summary>📝 Or follow manual steps ({instructions.platform})</summary>
+            <summary>📝 Manual installation steps ({instructions.platform})</summary>
             <ol>
               {instructions.steps.map((step, i) => (
                 <li key={i}>
