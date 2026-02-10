@@ -1,77 +1,81 @@
-import { useState, useEffect } from 'react'
-import CopyButton from './CopyButton'
-import ConfigWizard from './ConfigWizard'
-import { generateUserJsScript, generateRestartScript, generateEmergencyRecoveryScript } from '../utils/clipboard'
-import './UserJsEditor.css'
+import { useState, useEffect } from "react";
+import CopyButton from "./CopyButton";
+import ConfigWizard from "./ConfigWizard";
+import {
+  generateUserJsScript,
+  generateRestartScript,
+  generateEmergencyRecoveryScript,
+} from "../utils/clipboard";
+import "./UserJsEditor.css";
 
 function UserJsEditor({ showToast, systemInfo, apiMode }) {
-  const [content, setContent] = useState('')
-  const [originalContent, setOriginalContent] = useState('')
-  const [filePath, setFilePath] = useState('')
-  const [isModified, setIsModified] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [showWizard, setShowWizard] = useState(false)
+  const [content, setContent] = useState("");
+  const [originalContent, setOriginalContent] = useState("");
+  const [filePath, setFilePath] = useState("");
+  const [isModified, setIsModified] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
 
-  const notify = showToast || (() => {})
-  const isDemoMode = apiMode === 'demo' || apiMode === 'disconnected'
+  const notify = showToast || (() => {});
+  const isDemoMode = apiMode === "demo" || apiMode === "disconnected";
 
   // Load user.js content
   const loadUserJs = async () => {
     try {
-      const response = await fetch('/api/user-js')
-      const data = await response.json()
-      setContent(data.content || '')
-      setOriginalContent(data.content || '')
-      setFilePath(data.path || '')
-      setIsModified(false)
+      const response = await fetch("/api/user-js");
+      const data = await response.json();
+      setContent(data.content || "");
+      setOriginalContent(data.content || "");
+      setFilePath(data.path || "");
+      setIsModified(false);
     } catch (error) {
-      console.error('Failed to load user.js:', error)
-      notify('Failed to load user.js', 'error')
+      console.error("Failed to load user.js:", error);
+      notify("Failed to load user.js", "error");
     }
-  }
+  };
 
   // Save user.js content (handles validation + Firefox running errors)
   const saveUserJs = async () => {
-    setIsSaving(true)
+    setIsSaving(true);
     try {
-      const response = await fetch('/api/user-js', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content })
-      })
-      const result = await response.json()
+      const response = await fetch("/api/user-js", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      const result = await response.json();
       if (!response.ok) {
-        notify(result.error || 'Save failed', 'error')
+        notify(result.error || "Save failed", "error");
       } else {
-        notify(result.message, 'success')
-        setOriginalContent(content)
-        setIsModified(false)
+        notify(result.message, "success");
+        setOriginalContent(content);
+        setIsModified(false);
       }
     } catch (error) {
-      console.error('Failed to save user.js:', error)
-      notify('Failed to save user.js', 'error')
+      console.error("Failed to save user.js:", error);
+      notify("Failed to save user.js", "error");
     } finally {
-      setIsSaving(false)
+      setIsSaving(false);
     }
-  }
+  };
 
   // Handle content change
   const handleChange = (e) => {
-    const newContent = e.target.value
-    setContent(newContent)
-    setIsModified(newContent !== originalContent)
-  }
+    const newContent = e.target.value;
+    setContent(newContent);
+    setIsModified(newContent !== originalContent);
+  };
 
   // Reset to original
   const handleReset = () => {
-    setContent(originalContent)
-    setIsModified(false)
-  }
+    setContent(originalContent);
+    setIsModified(false);
+  };
 
   // Load on mount
   useEffect(() => {
-    loadUserJs()
-  }, [])
+    loadUserJs();
+  }, []);
 
   return (
     <>
@@ -88,15 +92,20 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
         <div className="editor-header">
           <h2>📝 user.js Editor</h2>
           <div className="editor-info">
-            <span className="file-path">{filePath || 'Loading...'}</span>
-            {isModified && <span className="modified-indicator">● Modified</span>}
+            <span className="file-path">{filePath || "Loading..."}</span>
+            {isModified && (
+              <span className="modified-indicator">● Modified</span>
+            )}
           </div>
         </div>
 
         {isDemoMode && (
           <div className="demo-mode-banner">
             <span>📋 Clipboard Mode</span>
-            <p>Use the <strong>🧙 Setup Wizard</strong> button to get step-by-step scripts you can copy and run in your terminal.</p>
+            <p>
+              Use the <strong>🧙 Setup Wizard</strong> button to get
+              step-by-step scripts you can copy and run in your terminal.
+            </p>
           </div>
         )}
 
@@ -112,7 +121,7 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
                   disabled={!isModified || isSaving}
                   className="save-button"
                 >
-                  {isSaving ? '💾 Saving...' : '💾 Save'}
+                  {isSaving ? "💾 Saving..." : "💾 Save"}
                 </button>
                 <button
                   onClick={handleReset}
@@ -162,7 +171,8 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
         <div className="editor-footer">
           <div className="editor-footer-info">
             <p>
-              ⚠️ <strong>Important:</strong> Changes to user.js require Firefox restart to take effect.
+              ⚠️ <strong>Important:</strong> Changes to user.js require Firefox
+              restart to take effect.
             </p>
           </div>
           <div className="editor-footer-actions">
@@ -176,8 +186,7 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
         </div>
       </div>
     </>
-  )
+  );
 }
 
-export default UserJsEditor
-
+export default UserJsEditor;

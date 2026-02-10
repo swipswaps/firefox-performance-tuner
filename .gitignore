@@ -28,6 +28,11 @@ Thumbs.db
 # Cache
 .cache/
 
+# App state files (managed by scripts/start.sh and scripts/stop.sh)
+.vite.pid
+.server.pid
+.firewall-rules-added
+
 # Debugging artifacts (Augment extension bug-fixing session)
 apply-fix.cjs
 chatlog-*.txt

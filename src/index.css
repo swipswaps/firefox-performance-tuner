@@ -5,7 +5,7 @@
 }
 
 body {
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   background: #1a1a1a;
   color: #e0e0e0;
   padding: 20px;
@@ -51,9 +51,15 @@ body {
   font-weight: bold;
 }
 
-.status-ok { color: #4ade80; }
-.status-warn { color: #fbbf24; }
-.status-error { color: #ef4444; }
+.status-ok {
+  color: #4ade80;
+}
+.status-warn {
+  color: #fbbf24;
+}
+.status-error {
+  color: #ef4444;
+}
 
 .warning-box {
   background: #3a2a1a;
@@ -82,9 +88,15 @@ body {
   font-size: 0.85rem;
   color: #888;
 }
-.proc-stat strong { color: #e0e0e0; }
-.val-high { color: #ef4444 !important; }
-.val-med { color: #fbbf24 !important; }
+.proc-stat strong {
+  color: #e0e0e0;
+}
+.val-high {
+  color: #ef4444 !important;
+}
+.val-med {
+  color: #fbbf24 !important;
+}
 
 .proc-table-wrap {
   overflow-x: auto;
@@ -115,15 +127,34 @@ body {
   top: 0;
   z-index: 1;
 }
-.proc-table th:hover { color: #ccc; background: #252525; }
-.proc-table tr:hover td { background: rgba(255,255,255,0.02); }
-.proc-row { transition: background 0.15s; }
-.proc-row:hover td { background: rgba(74, 158, 255, 0.05); }
-.proc-row-expanded td { background: rgba(74, 158, 255, 0.08) !important; border-bottom-color: #4a9eff; }
-.proc-pid { font-family: 'Courier New', monospace; color: #4a9eff; text-align: left; }
-.proc-type { font-size: 0.8rem; color: #ccc; }
+.proc-table th:hover {
+  color: #ccc;
+  background: #252525;
+}
+.proc-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.proc-row {
+  transition: background 0.15s;
+}
+.proc-row:hover td {
+  background: rgba(74, 158, 255, 0.05);
+}
+.proc-row-expanded td {
+  background: rgba(74, 158, 255, 0.08) !important;
+  border-bottom-color: #4a9eff;
+}
+.proc-pid {
+  font-family: "Courier New", monospace;
+  color: #4a9eff;
+  text-align: left;
+}
+.proc-type {
+  font-size: 0.8rem;
+  color: #ccc;
+}
 .proc-num {
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   text-align: right;
   white-space: nowrap;
 }
@@ -157,8 +188,14 @@ body {
   animation: detailSlide 0.2s ease-out;
 }
 @keyframes detailSlide {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .proc-detail-grid {
   display: grid;
@@ -166,7 +203,7 @@ body {
   gap: 16px;
 }
 .detail-section {
-  background: rgba(255,255,255,0.02);
+  background: rgba(255, 255, 255, 0.02);
   border-radius: 6px;
   padding: 12px;
 }
@@ -191,11 +228,11 @@ body {
 .detail-section dd {
   margin: 0;
   color: #e0e0e0;
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   text-align: right;
 }
 .detail-mono {
-  font-family: 'Courier New', monospace !important;
+  font-family: "Courier New", monospace !important;
   font-size: 0.75rem;
   word-break: break-all;
   white-space: normal;
@@ -295,9 +332,15 @@ pre {
   font-size: 0.85rem;
   color: #888;
 }
-.log-stat-warn { color: #fbbf24; }
-.log-stat-error { color: #ef4444; }
-.log-stat-ok { color: #4ade80; }
+.log-stat-warn {
+  color: #fbbf24;
+}
+.log-stat-error {
+  color: #ef4444;
+}
+.log-stat-ok {
+  color: #4ade80;
+}
 
 .log-scroll {
   max-height: 300px;
@@ -310,20 +353,29 @@ pre {
 
 .log-row {
   padding: 3px 12px;
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   font-size: 0.8rem;
   border-left: 3px solid transparent;
   transition: background 0.1s;
 }
-.log-row:hover { background: rgba(255,255,255,0.03); }
-.log-row.log-error { border-left-color: #ef4444; color: #fca5a5; }
-.log-row.log-warn { border-left-color: #fbbf24; color: #fde68a; }
-.log-row.log-info { color: #888; }
+.log-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.log-row.log-error {
+  border-left-color: #ef4444;
+  color: #fca5a5;
+}
+.log-row.log-warn {
+  border-left-color: #fbbf24;
+  color: #fde68a;
+}
+.log-row.log-info {
+  color: #888;
+}
 
 .log-text {
   word-break: break-all;
 }
-
 
 /* === Preferences Panel === */
 .pref-toolbar {
@@ -349,7 +401,9 @@ pre {
   outline: none;
   border-color: #4a9eff;
 }
-.pref-search::placeholder { color: #666; }
+.pref-search::placeholder {
+  color: #666;
+}
 
 .pref-filters {
   display: flex;
@@ -368,10 +422,25 @@ pre {
   margin: 0;
   transition: all 0.2s;
 }
-.filter-btn:hover { background: #444; color: #ccc; }
-.filter-btn.filter-active { background: #4a9eff; color: #fff; border-color: #4a9eff; }
-.filter-btn-warn.filter-active { background: #f59e0b; color: #000; border-color: #f59e0b; }
-.filter-btn-ok.filter-active { background: #22c55e; color: #000; border-color: #22c55e; }
+.filter-btn:hover {
+  background: #444;
+  color: #ccc;
+}
+.filter-btn.filter-active {
+  background: #4a9eff;
+  color: #fff;
+  border-color: #4a9eff;
+}
+.filter-btn-warn.filter-active {
+  background: #f59e0b;
+  color: #000;
+  border-color: #f59e0b;
+}
+.filter-btn-ok.filter-active {
+  background: #22c55e;
+  color: #000;
+  border-color: #22c55e;
+}
 
 .pref-row {
   padding: 10px 12px;
@@ -380,10 +449,18 @@ pre {
   border-left: 3px solid transparent;
   transition: background 0.15s;
 }
-.pref-row:hover { background: rgba(255,255,255,0.03); }
-.pref-ok { border-left-color: #4ade80; }
-.pref-warn { border-left-color: #fbbf24; }
-.pref-error { border-left-color: #ef4444; }
+.pref-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.pref-ok {
+  border-left-color: #4ade80;
+}
+.pref-warn {
+  border-left-color: #fbbf24;
+}
+.pref-error {
+  border-left-color: #ef4444;
+}
 
 .pref-main {
   display: flex;
@@ -406,7 +483,7 @@ pre {
 }
 
 .pref-key {
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   font-size: 0.9rem;
   color: #e0e0e0;
   word-break: break-all;
@@ -427,7 +504,7 @@ pre {
 }
 
 .pref-actual {
-  font-family: 'Courier New', monospace;
+  font-family: "Courier New", monospace;
   font-size: 0.9rem;
   color: #e0e0e0;
   font-weight: bold;
@@ -450,5 +527,11 @@ pre {
   margin-top: 12px;
 }
 
-.pref-action-text strong { color: #fbbf24; }
-.pref-action-text p { color: #ccc; margin: 4px 0 0; font-size: 0.85rem; }
+.pref-action-text strong {
+  color: #fbbf24;
+}
+.pref-action-text p {
+  color: #ccc;
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+}

@@ -14,13 +14,13 @@
 
 export async function copyToClipboard(text, showToast) {
   try {
-    await navigator.clipboard.writeText(text)
-    if (showToast) showToast('📋 Copied to clipboard!', 'success', 2000)
-    return true
+    await navigator.clipboard.writeText(text);
+    if (showToast) showToast("📋 Copied to clipboard!", "success", 2000);
+    return true;
   } catch (error) {
-    console.error('Clipboard copy failed:', error)
-    if (showToast) showToast('❌ Clipboard copy failed', 'error', 2000)
-    return false
+    console.error("Clipboard copy failed:", error);
+    if (showToast) showToast("❌ Clipboard copy failed", "error", 2000);
+    return false;
   }
 }
 
@@ -98,7 +98,7 @@ echo "   $FULL_PATH"
 echo ""
 echo "📁 Profile contents:"
 ls -lh "$FULL_PATH" | grep -E "prefs.js|user.js" || echo "   (no user.js yet)"
-`
+`;
 }
 
 /**
@@ -143,7 +143,9 @@ if pgrep -x firefox >/dev/null 2>&1; then
   exit 1
 fi
 
-${backup ? `# 3. Rotate backups (keep last 5)
+${
+  backup
+    ? `# 3. Rotate backups (keep last 5)
 if [ -f "$USERJS" ]; then
   echo "💾 Creating backup..."
   for i in {4..1}; do
@@ -152,7 +154,9 @@ if [ -f "$USERJS" ]; then
   cp "$USERJS" "$USERJS.backup.1"
   echo "✓ Backup created: $USERJS.backup.1"
 fi
-` : ''}
+`
+    : ""
+}
 # 4. Write new user.js
 cat > "$USERJS" << 'USERJS_EOF'
 ${content}
@@ -162,7 +166,7 @@ echo "✓ user.js written to: $USERJS"
 echo ""
 echo "⚠️  IMPORTANT: Restart Firefox to apply changes"
 echo "   Run: firefox &"
-`
+`;
 }
 
 /**
@@ -237,7 +241,7 @@ echo ""
 echo "   Or delete user.js entirely:"
 echo "   rm ~/.mozilla/firefox/*/user.js"
 echo "   firefox &"
-`
+`;
 }
 
 /**
@@ -345,19 +349,22 @@ echo "💡 If Firefox still won't start:"
 echo "   1. Run this script again and choose option 5 (Safe Mode)"
 echo "   2. Check about:support for profile path"
 echo "   3. Manually delete: $USERJS"
-`
+`;
 }
 
 export function generatePreferenceScript(prefs) {
   const prefLines = Object.entries(prefs)
     .map(([key, value]) => `user_pref("${key}", ${value});`)
-    .join('\n')
+    .join("\n");
 
-  return generateUserJsScript(`// Firefox Performance Tuner - Generated Configuration
+  return generateUserJsScript(
+    `// Firefox Performance Tuner - Generated Configuration
 // Generated: ${new Date().toISOString()}
 
 ${prefLines}
-`, true)
+`,
+    true,
+  );
 }
 
 /**
@@ -487,7 +494,7 @@ case $choice in
     echo "❌ Invalid option"
     ;;
 esac
-`
+`;
 }
 
 /**
@@ -499,15 +506,19 @@ esac
  * - Refuses to run if Firefox is active
  * - Provides clear error messages
  */
-export function generateFullSetupScript(systemInfo, preferences, userJsContent) {
-  const hasUserJs = userJsContent && userJsContent.trim().length > 0
+export function generateFullSetupScript(
+  systemInfo,
+  preferences,
+  userJsContent,
+) {
+  const hasUserJs = userJsContent && userJsContent.trim().length > 0;
 
   return `#!/usr/bin/env bash
 set -euo pipefail
 
 echo "🦊 Firefox Performance Tuner - Complete Setup"
 echo "=============================================="
-${systemInfo ? `echo "System: ${systemInfo.gpu || 'Unknown GPU'}, ${systemInfo.ram || 'Unknown RAM'}"` : ''}
+${systemInfo ? `echo "System: ${systemInfo.gpu || "Unknown GPU"}, ${systemInfo.ram || "Unknown RAM"}"` : ""}
 echo "Generated: ${new Date().toISOString()}"
 echo ""
 
@@ -584,7 +595,7 @@ fi
 echo ""
 echo "📝 Step 4/4: Writing configuration..."
 cat > "$USERJS" << 'USERJS_EOF'
-${hasUserJs ? userJsContent : '// Firefox Performance Tuner Configuration\n// Generated: ' + new Date().toISOString() + '\n// No preferences configured yet'}
+${hasUserJs ? userJsContent : "// Firefox Performance Tuner Configuration\n// Generated: " + new Date().toISOString() + "\n// No preferences configured yet"}
 USERJS_EOF
 
 echo "✓ Configuration written to: $USERJS"
@@ -604,7 +615,7 @@ echo ""
 echo "⏱️  Wait 5 seconds, then verify Firefox is running:"
 echo "   pgrep -x firefox"
 echo ""
-${hasUserJs ? '' : 'echo "ℹ️  Note: No preferences configured yet"'}
+${hasUserJs ? "" : 'echo "ℹ️  Note: No preferences configured yet"'}
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🆘 EMERGENCY RECOVERY (if Firefox won't start):"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -628,6 +639,5 @@ echo "   firefox -ProfileManager"
 echo ""
 echo "💡 Backups are kept in: $(dirname $USERJS)"
 echo "   Pattern: user.js.backup.1 (most recent) to user.js.backup.5 (oldest)"
-`
+`;
 }
-

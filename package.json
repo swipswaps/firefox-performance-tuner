@@ -4,11 +4,13 @@
   "description": "React app for tuning Firefox performance on X11+Mesa",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "setup": "bash scripts/setup.sh",
+    "start": "bash scripts/start.sh",
+    "stop": "bash scripts/stop.sh",
+    "dev": "bash scripts/start.sh",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "node server.js",
-    "start": "concurrently \"npm run server\" \"npm run dev\""
+    "server": "node server.js"
   },
   "keywords": [
     "firefox",
@@ -29,5 +31,11 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "vite": "^7.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.3.0"
   }
 }
