@@ -11,6 +11,52 @@ body {
   padding: 20px;
 }
 
+/* Global code/kbd styles for accessibility */
+code {
+  background: #2a2a2a;
+  color: #4a9eff;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: "Courier New", monospace;
+  font-size: 0.9em;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+}
+
+kbd {
+  background: #333;
+  color: #e0e0e0;
+  padding: 2px 8px;
+  border: 1px solid #555;
+  border-radius: 3px;
+  font-family: "Courier New", monospace;
+  font-size: 0.85em;
+  box-shadow: 0 2px 0 #222;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+}
+
+a {
+  color: #4a9eff;
+  text-decoration: underline;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+}
+
+a:hover {
+  color: #6bb3ff;
+}
+
+/* Ensure all text is selectable */
+p, li, ol, ul, strong {
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+}
+
 .container {
   max-width: 1200px;
   margin: 0 auto;
