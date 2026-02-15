@@ -24,10 +24,11 @@ export default function AutoFix({ preferences, categories, showToast, onFixed })
 
     const confirmed = window.confirm(
       `Auto-fix will:\n\n` +
+      `✅ Automatically close Firefox (if running)\n` +
       `✅ Fix ${issueCount} preference issues\n` +
       `✅ Create automatic backup\n` +
       `✅ Apply optimal settings for video playback and tab suspension\n\n` +
-      `⚠️ Firefox must be closed before proceeding.\n\n` +
+      `⚠️ Save any work in Firefox before continuing!\n\n` +
       `Continue?`
     );
 

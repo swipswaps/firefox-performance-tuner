@@ -1221,11 +1221,29 @@ app.get("/api/external-players", async (req, res) => {
 // NEW: Auto-fix all preference issues (one-click fix)
 app.post("/api/auto-fix", async (req, res) => {
   try {
-    // 1. Check if Firefox is running
+    // 1. Close Firefox if running
     if (await isFirefoxRunning()) {
-      return res.status(409).json({
-        error: "Close Firefox before auto-fixing — profile is locked while running",
-      });
+      try {
+        // Kill all Firefox processes
+        await execFileAsync("pkill", ["-9", "firefox"], { timeout: 5000 });
+        // Wait for processes to fully terminate
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        // Verify Firefox is actually closed
+        if (await isFirefoxRunning()) {
+          return res.status(409).json({
+            error: "Failed to close Firefox automatically. Please close it manually and try again.",
+          });
+        }
+      } catch (error) {
+        // pkill returns non-zero if no processes found, which is fine
+        // Continue to check if Firefox is actually closed
+        if (await isFirefoxRunning()) {
+          return res.status(409).json({
+            error: "Failed to close Firefox automatically. Please close it manually and try again.",
+          });
+        }
+      }
     }
 
     // 2. Generate optimal user.js content from PREF_CATEGORIES
