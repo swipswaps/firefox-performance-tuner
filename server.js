@@ -1218,6 +1218,61 @@ app.get("/api/external-players", async (req, res) => {
   }
 });
 
+// NEW: Auto-fix all preference issues (one-click fix)
+app.post("/api/auto-fix", async (req, res) => {
+  try {
+    // 1. Check if Firefox is running
+    if (await isFirefoxRunning()) {
+      return res.status(409).json({
+        error: "Close Firefox before auto-fixing — profile is locked while running",
+      });
+    }
+
+    // 2. Generate optimal user.js content from PREF_CATEGORIES
+    const content = generateTemplate();
+
+    // 3. Validate content
+    const validation = validateUserJS(content);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.reason });
+    }
+
+    // 4. Get profile path and create backup
+    const profilePath = await resolveProfile();
+    const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`;
+    const backupPath = await rotateBackups(userJsFile);
+
+    // 5. Write user.js
+    await writeFile(userJsFile, content, "utf-8");
+
+    // 6. Count issues fixed (all preferences in PREF_CATEGORIES)
+    const flatPrefs = {};
+    for (const cat of Object.values(PREF_CATEGORIES)) {
+      for (const key of Object.keys(cat)) {
+        flatPrefs[key] = true;
+      }
+    }
+    const issuesFixed = Object.keys(flatPrefs).length;
+
+    // 7. Return success response
+    res.json({
+      success: true,
+      message: `Auto-fixed ${issuesFixed} preference issues`,
+      issuesFixed,
+      issues: Object.keys(flatPrefs),
+      backupCreated: !!backupPath,
+      backupPath: backupPath || "none",
+      nextSteps: [
+        "Restart Firefox to apply changes",
+        "Verify preferences in about:config",
+        "Test video playback and tab performance",
+      ],
+    });
+  } catch (error) {
+    res.status(500).json(safeError(error));
+  }
+});
+
 // Get user.js content (returns template if file doesn't exist)
 app.get("/api/user-js", async (req, res) => {
   try {
