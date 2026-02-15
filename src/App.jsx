@@ -5,6 +5,7 @@ import ProcessMonitor from "./components/ProcessMonitor";
 import LogViewer from "./components/LogViewer";
 import UserJsEditor from "./components/UserJsEditor";
 import AutoFix from "./components/AutoFix";
+import TelemetryBlocker from "./components/TelemetryBlocker";
 import ToastContainer, { showToast } from "./components/Toast";
 import StatusBadge from "./components/StatusBadge";
 import CopyButton from "./components/CopyButton";
@@ -292,6 +293,8 @@ function App() {
               showToast={showToast}
               onFixed={fetchAll}
             />
+
+            <TelemetryBlocker />
 
             <div className="section" style={{ marginTop: "16px" }}>
               <div className="section-title">🧪 Performance Benchmark</div>

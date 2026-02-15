@@ -75,11 +75,7 @@ const PREF_CATEGORIES = {
       description:
         "Disable disk cache — eliminates frequent disk writes, use memory only (Betterfox/ArchWiki)",
     },
-    "browser.cache.memory.enable": {
-      expected: "true",
-      description:
-        "Enable memory cache for fast access to recently loaded resources",
-    },
+    // REMOVED: browser.cache.memory.enable - Firefox 147 ignores this (default is already true)
     "browser.cache.memory.capacity": {
       expected: "131072",
       description:
@@ -132,26 +128,10 @@ const PREF_CATEGORIES = {
       description:
         "Enable VA-API hardware video decoding — eliminates spinning wheel during video playback",
     },
-    "media.rdd-process.enabled": {
-      expected: "true",
-      description:
-        "Enable Remote Data Decoder process — isolates media decoding for stability",
-    },
-    "media.av1.enabled": {
-      expected: "true",
-      description:
-        "Enable AV1 codec support — modern efficient video codec",
-    },
-    "media.navigator.mediadatadecoder_vpx_enabled": {
-      expected: "true",
-      description:
-        "Enable VP8/VP9 hardware decoding — set to false if green artifacts appear",
-    },
-    "media.autoplay.blocking_policy": {
-      expected: "0",
-      description:
-        "Don't block autoplay — prevents video loading delays (0=allow all)",
-    },
+    // REMOVED: media.rdd-process.enabled - Always enabled in Firefox 147, not user-configurable
+    // REMOVED: media.av1.enabled - Always enabled in Firefox 147, not user-configurable
+    // REMOVED: media.navigator.mediadatadecoder_vpx_enabled - Removed in Firefox 147
+    // REMOVED: media.autoplay.blocking_policy - Controlled by UI, user.js override disabled
     "media.block-autoplay-until-in-foreground": {
       expected: "false",
       description:
@@ -167,11 +147,7 @@ const PREF_CATEGORIES = {
       description:
         "Delay before suspending background video (5 seconds) — prevents premature suspension",
     },
-    "media.videocontrols.picture-in-picture.enabled": {
-      expected: "true",
-      description:
-        "Enable Picture-in-Picture — watch video while browsing other tabs",
-    },
+    // REMOVED: media.videocontrols.picture-in-picture.enabled - Always enabled in Firefox 147
   },
   "Tab Suspension & Background Management": {
     "browser.tabs.unloadOnLowMemory": {
@@ -194,11 +170,7 @@ const PREF_CATEGORIES = {
       description:
         "Throttle background tab timers to 10 seconds — drastically reduces CPU usage",
     },
-    "dom.timeout.throttling_delay": {
-      expected: "30000",
-      description:
-        "Delay before throttling background timers (30s) — aggressive background tab suspension",
-    },
+    // REMOVED: dom.timeout.throttling_delay - Removed or renamed in Firefox 147
     "dom.ipc.keepProcessesAlive.web": {
       expected: "1",
       description:
@@ -302,11 +274,7 @@ const PREF_CATEGORIES = {
       description:
         "Disable data reporting — saves bandwidth and CPU (Betterfox)",
     },
-    "toolkit.telemetry.enabled": {
-      expected: "false",
-      description:
-        "Disable telemetry collection — reduces background CPU usage (Betterfox)",
-    },
+    // REMOVED: toolkit.telemetry.enabled - LOCKED by Mozilla in Beta/Nightly (Bugzilla #1422689)
     "toolkit.telemetry.unified": {
       expected: "false",
       description:
@@ -999,7 +967,7 @@ app.get("/api/processes", async (req, res) => {
         const args = parts.slice(7).join(" ");
         const lastArg = parts[parts.length - 1];
         const knownTypes = ["tab", "socket", "rdd", "utility", "forkserver"];
-        const type = knownTypes.includes(lastArg)
+        const baseType = knownTypes.includes(lastArg)
           ? lastArg
           : args.includes("crashhelper")
             ? "crashhelper"
@@ -1010,6 +978,23 @@ app.get("/api/processes", async (req, res) => {
         // Read /proc detail in parallel (non-blocking, best-effort)
         const detail = await readProcDetail(pid);
 
+        // Enhanced classification: determine if content process is active or idle
+        let type = baseType;
+        let classification = "system"; // main, system, active-content, idle-content
+
+        if (baseType === "main") {
+          classification = "main";
+        } else if (["socket", "rdd", "utility", "forkserver", "crashhelper"].includes(baseType)) {
+          classification = "system";
+        } else if (baseType === "tab" || baseType === "content") {
+          // Classify content processes as active or idle based on CPU usage
+          // Active: CPU > 0.5% OR high thread count (actively rendering)
+          // Idle: CPU <= 0.5% AND low thread count (preloaded/suspended)
+          const isActive = cpu > 0.5 || threads > 18;
+          classification = isActive ? "active-content" : "idle-content";
+          type = isActive ? "active-tab" : "idle-tab";
+        }
+
         return {
           pid,
           cpu,
@@ -1019,6 +1004,8 @@ app.get("/api/processes", async (req, res) => {
           stat,
           uptimeSec,
           type,
+          baseType,
+          classification,
           args,
           detail,
         };
@@ -1559,6 +1546,196 @@ app.post("/api/wizard/rollback", async (_req, res) => {
     });
   } catch (error) {
     res.status(500).json(safeError(error));
+  }
+});
+
+// ============================================================================
+// TELEMETRY BLOCKING ENDPOINTS
+// ============================================================================
+
+// Check current telemetry blocking status
+app.get("/api/telemetry/status", async (_req, res) => {
+  try {
+    const status = {
+      dnsBlocking: false,
+      enterprisePolicy: false,
+      dnsBlockedDomains: [],
+      policyPath: null,
+      verification: {},
+    };
+
+    // Check DNS blocking in /etc/hosts
+    const hostsFile = "/etc/hosts";
+    if (existsSync(hostsFile)) {
+      const hostsContent = await readFile(hostsFile, "utf8");
+      const marker = "# Mozilla Telemetry Blocking (added by Firefox Performance Tuner)";
+      status.dnsBlocking = hostsContent.includes(marker);
+
+      if (status.dnsBlocking) {
+        // Count blocked domains
+        const lines = hostsContent.split("\n");
+        const blockedDomains = lines
+          .filter((line) => line.includes("telemetry") || line.includes("mozilla"))
+          .filter((line) => line.startsWith("127.0.0.1"))
+          .map((line) => line.split(/\s+/)[1])
+          .filter(Boolean);
+        status.dnsBlockedDomains = blockedDomains;
+      }
+    }
+
+    // Check Enterprise Policy
+    const policyPaths = [
+      "/etc/firefox/policies/policies.json",
+      "/usr/lib64/firefox/distribution/policies.json",
+    ];
+
+    for (const policyPath of policyPaths) {
+      if (existsSync(policyPath)) {
+        try {
+          const policyContent = await readFile(policyPath, "utf8");
+          const policy = JSON.parse(policyContent);
+          if (policy.policies?.DisableTelemetry) {
+            status.enterprisePolicy = true;
+            status.policyPath = policyPath;
+            break;
+          }
+        } catch (err) {
+          // Invalid JSON, skip
+        }
+      }
+    }
+
+    // Verify DNS blocking works (test one domain)
+    if (status.dnsBlocking) {
+      try {
+        const { stdout } = await execFileAsync("nslookup", ["incoming.telemetry.mozilla.org"], {
+          timeout: 3000,
+        });
+        status.verification.dnsTest = stdout.includes("127.0.0.1") ? "BLOCKED" : "NOT_BLOCKED";
+      } catch (err) {
+        status.verification.dnsTest = "ERROR";
+      }
+    }
+
+    res.json(status);
+  } catch (error) {
+    console.error("Telemetry status check error:", error);
+    res.status(500).json(safeError(error));
+  }
+});
+
+// Block telemetry via DNS (/etc/hosts)
+app.post("/api/telemetry/block-dns", async (req, res) => {
+  try {
+    const scriptPath = path.join(process.cwd(), "scripts/block-telemetry-dns.sh");
+
+    if (!existsSync(scriptPath)) {
+      return res.status(404).json({
+        error: "Script not found",
+        message: "block-telemetry-dns.sh not found in scripts/ directory",
+      });
+    }
+
+    // Execute script with sudo (will prompt user for password)
+    const { stdout, stderr } = await execFileAsync("pkexec", [scriptPath], {
+      timeout: 30000,
+    });
+
+    // Verify blocking worked
+    let verification = "UNKNOWN";
+    try {
+      const { stdout: nslookupOut } = await execFileAsync(
+        "nslookup",
+        ["incoming.telemetry.mozilla.org"],
+        { timeout: 3000 }
+      );
+      verification = nslookupOut.includes("127.0.0.1") ? "SUCCESS" : "FAILED";
+    } catch (err) {
+      verification = "ERROR";
+    }
+
+    res.json({
+      success: true,
+      message: "DNS-level telemetry blocking enabled",
+      output: stdout,
+      verification,
+      nextSteps: [
+        "Telemetry domains now resolve to 127.0.0.1",
+        "Blocking survives system reboots",
+        "Backup created at /etc/hosts.backup-*",
+      ],
+    });
+  } catch (error) {
+    console.error("DNS blocking error:", error);
+    res.status(500).json({
+      error: error.message,
+      message: "Failed to enable DNS blocking. Make sure you have sudo access.",
+    });
+  }
+});
+
+// Install Enterprise Policy
+app.post("/api/telemetry/install-policy", async (req, res) => {
+  try {
+    const policyDir = "/etc/firefox/policies";
+    const policyFile = `${policyDir}/policies.json`;
+
+    const policy = {
+      policies: {
+        DisableTelemetry: true,
+        DisableFirefoxStudies: true,
+        DisablePocket: true,
+        DisableFormHistory: true,
+        DontCheckDefaultBrowser: true,
+        DisableFirefoxAccounts: true,
+        OverrideFirstRunPage: "",
+        OverridePostUpdatePage: "",
+      },
+    };
+
+    const policyContent = JSON.stringify(policy, null, 2);
+
+    // Create script to install policy (requires sudo)
+    const installScript = `#!/bin/bash
+set -e
+mkdir -p "${policyDir}"
+cat > "${policyFile}" << 'EOF'
+${policyContent}
+EOF
+chmod 644 "${policyFile}"
+echo "SUCCESS: Enterprise policy installed at ${policyFile}"
+`;
+
+    const scriptPath = `${STATE_DIR}/install-policy.sh`;
+    await writeFile(scriptPath, installScript, { mode: 0o755 });
+
+    // Execute with sudo
+    const { stdout } = await execFileAsync("pkexec", [scriptPath], {
+      timeout: 10000,
+    });
+
+    // Verify policy was created
+    const policyExists = existsSync(policyFile);
+
+    res.json({
+      success: true,
+      message: "Enterprise policy installed successfully",
+      policyPath: policyFile,
+      policyContent: policy,
+      verification: policyExists ? "SUCCESS" : "FAILED",
+      nextSteps: [
+        "Restart Firefox to apply policy",
+        "Policy applies to all users on this system",
+        "Policy cannot be overridden by user.js",
+        "Verify in about:policies",
+      ],
+    });
+  } catch (error) {
+    console.error("Policy installation error:", error);
+    res.status(500).json({
+      error: error.message,
+      message: "Failed to install enterprise policy. Make sure you have sudo access.",
+    });
   }
 });
 

@@ -2,6 +2,8 @@ import { useMemo, useState, useCallback } from "react";
 
 const TYPE_LABELS = {
   main: "🦊 Main",
+  "active-tab": "📄 Active Tab",
+  "idle-tab": "💤 Idle Content",
   tab: "📄 Tab",
   socket: "🔌 Socket",
   rdd: "🎬 RDD",
@@ -9,6 +11,17 @@ const TYPE_LABELS = {
   forkserver: "🔀 Fork",
   crashhelper: "🛟 Crash",
   content: "📦 Content",
+};
+
+const TYPE_TOOLTIPS = {
+  main: "Main browser process (UI and chrome)",
+  "active-tab": "Active content process (rendering visible tab or high CPU activity)",
+  "idle-tab": "Idle content process (preloaded for performance or suspended tab)",
+  socket: "Network socket process",
+  rdd: "Remote Data Decoder (media decoding)",
+  utility: "Utility process (various background tasks)",
+  forkserver: "Fork server (process spawning)",
+  crashhelper: "Crash reporter process",
 };
 
 const STATE_LABELS = {
@@ -160,6 +173,7 @@ export default function ProcessMonitor({ processes }) {
   const [sortKey, setSortKey] = useState("cpu");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedPid, setExpandedPid] = useState(null);
+  const [showIdleProcesses, setShowIdleProcesses] = useState(false);
 
   const handleSort = useCallback(
     (key) => {
@@ -173,23 +187,53 @@ export default function ProcessMonitor({ processes }) {
     [sortKey],
   );
 
-  const sorted = useMemo(() => {
-    const list = (processes || []).slice();
-    const dir = sortDir === "asc" ? 1 : -1;
-    list.sort((a, b) => {
-      let av = a[sortKey],
-        bv = b[sortKey];
-      if (sortKey === "type") {
-        av = TYPE_LABELS[av] || av;
-        bv = TYPE_LABELS[bv] || bv;
-        return dir * av.localeCompare(bv);
+  // Group processes by classification
+  const grouped = useMemo(() => {
+    const groups = {
+      main: [],
+      "active-content": [],
+      "idle-content": [],
+      system: [],
+    };
+
+    (processes || []).forEach((p) => {
+      const classification = p.classification || "system";
+      if (groups[classification]) {
+        groups[classification].push(p);
+      } else {
+        groups.system.push(p);
       }
-      if (typeof av === "number" && typeof bv === "number")
-        return dir * (av - bv);
-      return dir * String(av).localeCompare(String(bv));
     });
-    return list;
+
+    // Sort each group
+    const dir = sortDir === "asc" ? 1 : -1;
+    Object.keys(groups).forEach((key) => {
+      groups[key].sort((a, b) => {
+        let av = a[sortKey],
+          bv = b[sortKey];
+        if (sortKey === "type") {
+          av = TYPE_LABELS[av] || av;
+          bv = TYPE_LABELS[bv] || bv;
+          return dir * av.localeCompare(bv);
+        }
+        if (typeof av === "number" && typeof bv === "number")
+          return dir * (av - bv);
+        return dir * String(av).localeCompare(String(bv));
+      });
+    });
+
+    return groups;
   }, [processes, sortKey, sortDir]);
+
+  // Flatten for totals
+  const sorted = useMemo(() => {
+    return [
+      ...grouped.main,
+      ...grouped["active-content"],
+      ...grouped["idle-content"],
+      ...grouped.system,
+    ];
+  }, [grouped]);
 
   const totalCpu = sorted.reduce((s, p) => s + p.cpu, 0).toFixed(1);
   const totalRss = Math.round(sorted.reduce((s, p) => s + p.rss, 0) / 1024);
@@ -207,6 +251,26 @@ export default function ProcessMonitor({ processes }) {
   return (
     <div className="section">
       <div className="section-title">🔍 Firefox Processes</div>
+
+      {/* Info box explaining Firefox's multi-process architecture */}
+      <div className="info-box" style={{ marginBottom: "16px", fontSize: "0.9em" }}>
+        <p style={{ margin: "0 0 8px 0" }}>
+          <strong>ℹ️ About Firefox Processes:</strong>
+        </p>
+        <p style={{ margin: "0 0 8px 0" }}>
+          Firefox uses a <strong>multi-process architecture</strong> (E10S/Fission) for security and performance.
+          Not all content processes correspond to visible tabs:
+        </p>
+        <ul style={{ margin: "0 0 8px 0", paddingLeft: "20px" }}>
+          <li><strong>Active Content:</strong> Rendering visible tabs or high CPU activity</li>
+          <li><strong>Idle Content:</strong> Preloaded processes (ready for new tabs) or suspended tabs (hibernated to save memory)</li>
+          <li><strong>System Processes:</strong> GPU, media decoding, networking, utilities</li>
+        </ul>
+        <p style={{ margin: 0, fontSize: "0.85em", color: "#888" }}>
+          💡 Tip: Use Firefox's built-in Task Manager (<kbd>Shift+Esc</kbd>) to see tab-to-process mapping with URLs.
+        </p>
+      </div>
+
       <div className="proc-summary">
         <span className="proc-stat">{sorted.length} processes</span>
         <span className="proc-stat">
@@ -249,50 +313,149 @@ export default function ProcessMonitor({ processes }) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((p) => {
-              const isExpanded = expandedPid === p.pid;
-              return (
-                <tr
-                  key={p.pid}
-                  className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
-                  onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
-                  title="Click for details"
-                  style={{ cursor: "pointer" }}
-                >
-                  <td className="proc-pid" style={{ width: "72px" }}>
-                    {p.pid}
-                  </td>
-                  <td className="proc-type" style={{ width: "90px" }}>
-                    {TYPE_LABELS[p.type] || p.type}
-                  </td>
-                  <td
-                    className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`}
-                    style={{ width: "80px" }}
-                  >
-                    {p.cpu.toFixed(1)}
-                    <div
-                      className="proc-bar"
-                      style={{ width: `${Math.min(p.cpu, 100)}%` }}
-                    />
-                  </td>
-                  <td
-                    className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`}
-                    style={{ width: "80px" }}
-                  >
-                    {p.mem.toFixed(1)}
-                  </td>
-                  <td className="proc-num" style={{ width: "80px" }}>
-                    {Math.round(p.rss / 1024)} MB
-                  </td>
-                  <td className="proc-num" style={{ width: "72px" }}>
-                    {p.threads || "—"}
-                  </td>
-                  <td className="proc-num" style={{ width: "80px" }}>
-                    {fmtUptime(p.uptimeSec || 0)}
+            {/* Main Process Group */}
+            {grouped.main.length > 0 && (
+              <>
+                <tr className="proc-group-header">
+                  <td colSpan={7} style={{ fontWeight: "bold", background: "#f0f0f0", padding: "8px" }}>
+                    🦊 Main Process ({grouped.main.length})
                   </td>
                 </tr>
-              );
-            })}
+                {grouped.main.map((p) => {
+                  const isExpanded = expandedPid === p.pid;
+                  return (
+                    <tr
+                      key={p.pid}
+                      className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
+                      onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
+                      title={TYPE_TOOLTIPS[p.type] || "Click for details"}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td className="proc-pid" style={{ width: "72px" }}>{p.pid}</td>
+                      <td className="proc-type" style={{ width: "90px" }}>{TYPE_LABELS[p.type] || p.type}</td>
+                      <td className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
+                        {p.cpu.toFixed(1)}
+                        <div className="proc-bar" style={{ width: `${Math.min(p.cpu, 100)}%` }} />
+                      </td>
+                      <td className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
+                        {p.mem.toFixed(1)}
+                      </td>
+                      <td className="proc-num" style={{ width: "80px" }}>{Math.round(p.rss / 1024)} MB</td>
+                      <td className="proc-num" style={{ width: "72px" }}>{p.threads || "—"}</td>
+                      <td className="proc-num" style={{ width: "80px" }}>{fmtUptime(p.uptimeSec || 0)}</td>
+                    </tr>
+                  );
+                })}
+              </>
+            )}
+
+            {/* Active Content Processes Group */}
+            {grouped["active-content"].length > 0 && (
+              <>
+                <tr className="proc-group-header">
+                  <td colSpan={7} style={{ fontWeight: "bold", background: "#e8f5e9", padding: "8px" }}>
+                    📄 Active Content Processes ({grouped["active-content"].length})
+                  </td>
+                </tr>
+                {grouped["active-content"].map((p) => {
+                  const isExpanded = expandedPid === p.pid;
+                  return (
+                    <tr
+                      key={p.pid}
+                      className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
+                      onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
+                      title={TYPE_TOOLTIPS[p.type] || "Click for details"}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td className="proc-pid" style={{ width: "72px" }}>{p.pid}</td>
+                      <td className="proc-type" style={{ width: "90px" }}>{TYPE_LABELS[p.type] || p.type}</td>
+                      <td className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
+                        {p.cpu.toFixed(1)}
+                        <div className="proc-bar" style={{ width: `${Math.min(p.cpu, 100)}%` }} />
+                      </td>
+                      <td className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
+                        {p.mem.toFixed(1)}
+                      </td>
+                      <td className="proc-num" style={{ width: "80px" }}>{Math.round(p.rss / 1024)} MB</td>
+                      <td className="proc-num" style={{ width: "72px" }}>{p.threads || "—"}</td>
+                      <td className="proc-num" style={{ width: "80px" }}>{fmtUptime(p.uptimeSec || 0)}</td>
+                    </tr>
+                  );
+                })}
+              </>
+            )}
+
+            {/* Idle Content Processes Group */}
+            {grouped["idle-content"].length > 0 && (
+              <>
+                <tr className="proc-group-header">
+                  <td colSpan={7} style={{ fontWeight: "bold", background: "#fff3e0", padding: "8px" }}>
+                    💤 Idle Content Processes ({grouped["idle-content"].length}) - Preloaded or Suspended
+                  </td>
+                </tr>
+                {grouped["idle-content"].map((p) => {
+                  const isExpanded = expandedPid === p.pid;
+                  return (
+                    <tr
+                      key={p.pid}
+                      className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
+                      onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
+                      title={TYPE_TOOLTIPS[p.type] || "Click for details"}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td className="proc-pid" style={{ width: "72px" }}>{p.pid}</td>
+                      <td className="proc-type" style={{ width: "90px" }}>{TYPE_LABELS[p.type] || p.type}</td>
+                      <td className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
+                        {p.cpu.toFixed(1)}
+                        <div className="proc-bar" style={{ width: `${Math.min(p.cpu, 100)}%` }} />
+                      </td>
+                      <td className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
+                        {p.mem.toFixed(1)}
+                      </td>
+                      <td className="proc-num" style={{ width: "80px" }}>{Math.round(p.rss / 1024)} MB</td>
+                      <td className="proc-num" style={{ width: "72px" }}>{p.threads || "—"}</td>
+                      <td className="proc-num" style={{ width: "80px" }}>{fmtUptime(p.uptimeSec || 0)}</td>
+                    </tr>
+                  );
+                })}
+              </>
+            )}
+
+            {/* System Processes Group */}
+            {grouped.system.length > 0 && (
+              <>
+                <tr className="proc-group-header">
+                  <td colSpan={7} style={{ fontWeight: "bold", background: "#e3f2fd", padding: "8px" }}>
+                    🔧 System Processes ({grouped.system.length})
+                  </td>
+                </tr>
+                {grouped.system.map((p) => {
+                  const isExpanded = expandedPid === p.pid;
+                  return (
+                    <tr
+                      key={p.pid}
+                      className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
+                      onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
+                      title={TYPE_TOOLTIPS[p.type] || "Click for details"}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td className="proc-pid" style={{ width: "72px" }}>{p.pid}</td>
+                      <td className="proc-type" style={{ width: "90px" }}>{TYPE_LABELS[p.type] || p.type}</td>
+                      <td className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
+                        {p.cpu.toFixed(1)}
+                        <div className="proc-bar" style={{ width: `${Math.min(p.cpu, 100)}%` }} />
+                      </td>
+                      <td className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
+                        {p.mem.toFixed(1)}
+                      </td>
+                      <td className="proc-num" style={{ width: "80px" }}>{Math.round(p.rss / 1024)} MB</td>
+                      <td className="proc-num" style={{ width: "72px" }}>{p.threads || "—"}</td>
+                      <td className="proc-num" style={{ width: "80px" }}>{fmtUptime(p.uptimeSec || 0)}</td>
+                    </tr>
+                  );
+                })}
+              </>
+            )}
           </tbody>
         </table>
       </div>
