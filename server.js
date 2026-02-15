@@ -1272,10 +1272,11 @@ app.post("/api/auto-fix", async (req, res) => {
     }
     const issuesFixed = Object.keys(flatPrefs).length;
 
-    // 7. Restart Firefox automatically
+    // 7. Restart Firefox automatically with the tuner URL
     try {
-      // Launch Firefox in background (detached process)
-      execFileAsync("firefox", [], {
+      // Launch Firefox with the tuner page (detached process)
+      // This allows user to continue using the tool immediately
+      execFileAsync("firefox", ["http://localhost:3000"], {
         detached: true,
         stdio: 'ignore'
       }).catch(() => {
