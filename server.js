@@ -289,11 +289,7 @@ const PREF_CATEGORIES = {
       description:
         "Limit content processes to 4 — optimal for 2-core CPU, reduces memory/CPU contention (ArchWiki)",
     },
-    "browser.sessionstore.interval": {
-      expected: "600000",
-      description:
-        "Save session every 10 minutes instead of 15s — reduces disk writes (ArchWiki)",
-    },
+    // browser.sessionstore.interval removed - duplicate of Tab Suspension category (line 182)
     "browser.sessionstore.max_tabs_undo": {
       expected: "10",
       description:
@@ -557,8 +553,22 @@ async function isFirefoxRunning() {
 }
 
 // === HEALTH ENDPOINT ===
+const SERVER_VERSION = Date.now(); // Timestamp for cache detection
+const PREF_COUNT = Object.values(PREF_CATEGORIES).reduce((sum, cat) => sum + Object.keys(cat).length, 0);
+
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok", mode: "full", version: "1.1.0" });
+  // No-cache headers to prevent stale data
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
+  res.json({
+    status: "ok",
+    mode: "full",
+    version: SERVER_VERSION,
+    prefCount: PREF_COUNT,
+    timestamp: Date.now()
+  });
 });
 
 // Resolve active Firefox profile
@@ -642,6 +652,11 @@ app.get("/api/system-info", async (req, res) => {
 
 // Get Firefox preferences (reads from prefs.js — the runtime state)
 app.get("/api/preferences", async (req, res) => {
+  // No-cache headers - critical for real-time preference monitoring
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+
   try {
     const profilePath = await resolveProfile();
     const prefsFile = `${MOZILLA_DIR}/${profilePath}/prefs.js`;
@@ -672,6 +687,13 @@ app.get("/api/preferences", async (req, res) => {
 
 // Get preference categories with descriptions
 app.get("/api/pref-categories", (req, res) => {
+  // No-cache headers - critical for detecting server updates
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('X-Server-Version', SERVER_VERSION);
+  res.setHeader('X-Pref-Count', PREF_COUNT);
+
   res.json(PREF_CATEGORIES);
 });
 
