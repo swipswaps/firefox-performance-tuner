@@ -370,18 +370,19 @@ export default function ProcessMonitor({ processes }) {
           Threads: <strong>{totalThreads}</strong>
         </span>
       </div>
-      <div className="proc-table-wrap">
-        <table className="proc-table">
-          <thead>
-            <tr>
+      <TableContainer component={Paper} sx={{ maxHeight: 600, mt: 2 }}>
+        <Table stickyHeader size="small">
+          <TableHead>
+            <TableRow>
               {COLUMNS.map((col) => (
-                <th
+                <TableCell
                   key={col.key}
-                  style={{
+                  align={col.align || "left"}
+                  sx={{
                     width: col.width,
-                    textAlign: col.align,
                     cursor: "pointer",
-                    userSelect: "none",
+                    fontWeight: "bold",
+                    userSelect: "text",
                   }}
                   onClick={() => handleSort(col.key)}
                   title={`Sort by ${col.label}`}
@@ -392,42 +393,46 @@ export default function ProcessMonitor({ processes }) {
                     sortKey={sortKey}
                     sortDir={sortDir}
                   />
-                </th>
+                </TableCell>
               ))}
-            </tr>
-          </thead>
-          <tbody>
+            </TableRow>
+          </TableHead>
+          <TableBody>
             {/* Main Process Group */}
             {grouped.main.length > 0 && (
               <>
-                <tr className="proc-group-header">
-                  <td colSpan={7} style={{ fontWeight: "bold", background: "#2a2a2a", color: "#e0e0e0", padding: "8px" }}>
+                <TableRow>
+                  <TableCell colSpan={7} sx={{ fontWeight: "bold", bgcolor: "#2a2a2a", color: "#e0e0e0", py: 1 }}>
                     🦊 Main Process ({grouped.main.length})
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
                 {grouped.main.map((p) => {
                   const isExpanded = expandedPid === p.pid;
                   return (
-                    <tr
+                    <TableRow
                       key={p.pid}
-                      className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
+                      hover
                       onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
                       title={TYPE_TOOLTIPS[p.type] || "Click for details"}
-                      style={{ cursor: "pointer" }}
+                      sx={{ cursor: "pointer", bgcolor: isExpanded ? "action.selected" : "inherit" }}
                     >
-                      <td className="proc-pid" style={{ width: "72px" }}>{p.pid}</td>
-                      <td className="proc-type" style={{ width: "90px" }}>{TYPE_LABELS[p.type] || p.type}</td>
-                      <td className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
-                        {p.cpu.toFixed(1)}
-                        <div className="proc-bar" style={{ width: `${Math.min(p.cpu, 100)}%` }} />
-                      </td>
-                      <td className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
-                        {p.mem.toFixed(1)}
-                      </td>
-                      <td className="proc-num" style={{ width: "80px" }}>{Math.round(p.rss / 1024)} MB</td>
-                      <td className="proc-num" style={{ width: "72px" }}>{p.threads || "—"}</td>
-                      <td className="proc-num" style={{ width: "80px" }}>{fmtUptime(p.uptimeSec || 0)}</td>
-                    </tr>
+                      <TableCell>{p.pid}</TableCell>
+                      <TableCell>{TYPE_LABELS[p.type] || p.type}</TableCell>
+                      <TableCell align="right">
+                        <Box component="span" sx={{ color: p.cpu > 20 ? "error.main" : p.cpu > 5 ? "warning.main" : "inherit" }}>
+                          {p.cpu.toFixed(1)}
+                        </Box>
+                        <Box sx={{ width: `${Math.min(p.cpu, 100)}%`, height: 4, bgcolor: "primary.main", mt: 0.5, borderRadius: 1 }} />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Box component="span" sx={{ color: p.mem > 10 ? "error.main" : p.mem > 5 ? "warning.main" : "inherit" }}>
+                          {p.mem.toFixed(1)}
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">{Math.round(p.rss / 1024)} MB</TableCell>
+                      <TableCell align="right">{p.threads || "—"}</TableCell>
+                      <TableCell align="right">{fmtUptime(p.uptimeSec || 0)}</TableCell>
+                    </TableRow>
                   );
                 })}
               </>
@@ -436,34 +441,38 @@ export default function ProcessMonitor({ processes }) {
             {/* Active Content Processes Group */}
             {grouped["active-content"].length > 0 && (
               <>
-                <tr className="proc-group-header">
-                  <td colSpan={7} style={{ fontWeight: "bold", background: "#1a3a1a", color: "#90ee90", padding: "8px" }}>
+                <TableRow>
+                  <TableCell colSpan={7} sx={{ fontWeight: "bold", bgcolor: "#1a3a1a", color: "#90ee90", py: 1 }}>
                     📄 Active Content Processes ({grouped["active-content"].length})
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
                 {grouped["active-content"].map((p) => {
                   const isExpanded = expandedPid === p.pid;
                   return (
-                    <tr
+                    <TableRow
                       key={p.pid}
-                      className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
+                      hover
                       onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
                       title={TYPE_TOOLTIPS[p.type] || "Click for details"}
-                      style={{ cursor: "pointer" }}
+                      sx={{ cursor: "pointer", bgcolor: isExpanded ? "action.selected" : "inherit" }}
                     >
-                      <td className="proc-pid" style={{ width: "72px" }}>{p.pid}</td>
-                      <td className="proc-type" style={{ width: "90px" }}>{TYPE_LABELS[p.type] || p.type}</td>
-                      <td className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
-                        {p.cpu.toFixed(1)}
-                        <div className="proc-bar" style={{ width: `${Math.min(p.cpu, 100)}%` }} />
-                      </td>
-                      <td className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
-                        {p.mem.toFixed(1)}
-                      </td>
-                      <td className="proc-num" style={{ width: "80px" }}>{Math.round(p.rss / 1024)} MB</td>
-                      <td className="proc-num" style={{ width: "72px" }}>{p.threads || "—"}</td>
-                      <td className="proc-num" style={{ width: "80px" }}>{fmtUptime(p.uptimeSec || 0)}</td>
-                    </tr>
+                      <TableCell>{p.pid}</TableCell>
+                      <TableCell>{TYPE_LABELS[p.type] || p.type}</TableCell>
+                      <TableCell align="right">
+                        <Box component="span" sx={{ color: p.cpu > 20 ? "error.main" : p.cpu > 5 ? "warning.main" : "inherit" }}>
+                          {p.cpu.toFixed(1)}
+                        </Box>
+                        <Box sx={{ width: `${Math.min(p.cpu, 100)}%`, height: 4, bgcolor: "primary.main", mt: 0.5, borderRadius: 1 }} />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Box component="span" sx={{ color: p.mem > 10 ? "error.main" : p.mem > 5 ? "warning.main" : "inherit" }}>
+                          {p.mem.toFixed(1)}
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">{Math.round(p.rss / 1024)} MB</TableCell>
+                      <TableCell align="right">{p.threads || "—"}</TableCell>
+                      <TableCell align="right">{fmtUptime(p.uptimeSec || 0)}</TableCell>
+                    </TableRow>
                   );
                 })}
               </>
@@ -472,34 +481,38 @@ export default function ProcessMonitor({ processes }) {
             {/* Idle Content Processes Group */}
             {grouped["idle-content"].length > 0 && (
               <>
-                <tr className="proc-group-header">
-                  <td colSpan={7} style={{ fontWeight: "bold", background: "#3a2a1a", color: "#ffcc80", padding: "8px" }}>
+                <TableRow>
+                  <TableCell colSpan={7} sx={{ fontWeight: "bold", bgcolor: "#3a2a1a", color: "#ffcc80", py: 1 }}>
                     💤 Idle Content Processes ({grouped["idle-content"].length}) - Preloaded or Suspended
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
                 {grouped["idle-content"].map((p) => {
                   const isExpanded = expandedPid === p.pid;
                   return (
-                    <tr
+                    <TableRow
                       key={p.pid}
-                      className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
+                      hover
                       onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
                       title={TYPE_TOOLTIPS[p.type] || "Click for details"}
-                      style={{ cursor: "pointer" }}
+                      sx={{ cursor: "pointer", bgcolor: isExpanded ? "action.selected" : "inherit" }}
                     >
-                      <td className="proc-pid" style={{ width: "72px" }}>{p.pid}</td>
-                      <td className="proc-type" style={{ width: "90px" }}>{TYPE_LABELS[p.type] || p.type}</td>
-                      <td className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
-                        {p.cpu.toFixed(1)}
-                        <div className="proc-bar" style={{ width: `${Math.min(p.cpu, 100)}%` }} />
-                      </td>
-                      <td className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
-                        {p.mem.toFixed(1)}
-                      </td>
-                      <td className="proc-num" style={{ width: "80px" }}>{Math.round(p.rss / 1024)} MB</td>
-                      <td className="proc-num" style={{ width: "72px" }}>{p.threads || "—"}</td>
-                      <td className="proc-num" style={{ width: "80px" }}>{fmtUptime(p.uptimeSec || 0)}</td>
-                    </tr>
+                      <TableCell>{p.pid}</TableCell>
+                      <TableCell>{TYPE_LABELS[p.type] || p.type}</TableCell>
+                      <TableCell align="right">
+                        <Box component="span" sx={{ color: p.cpu > 20 ? "error.main" : p.cpu > 5 ? "warning.main" : "inherit" }}>
+                          {p.cpu.toFixed(1)}
+                        </Box>
+                        <Box sx={{ width: `${Math.min(p.cpu, 100)}%`, height: 4, bgcolor: "primary.main", mt: 0.5, borderRadius: 1 }} />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Box component="span" sx={{ color: p.mem > 10 ? "error.main" : p.mem > 5 ? "warning.main" : "inherit" }}>
+                          {p.mem.toFixed(1)}
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">{Math.round(p.rss / 1024)} MB</TableCell>
+                      <TableCell align="right">{p.threads || "—"}</TableCell>
+                      <TableCell align="right">{fmtUptime(p.uptimeSec || 0)}</TableCell>
+                    </TableRow>
                   );
                 })}
               </>
@@ -508,41 +521,45 @@ export default function ProcessMonitor({ processes }) {
             {/* System Processes Group */}
             {grouped.system.length > 0 && (
               <>
-                <tr className="proc-group-header">
-                  <td colSpan={7} style={{ fontWeight: "bold", background: "#1a2a3a", color: "#90caf9", padding: "8px" }}>
+                <TableRow>
+                  <TableCell colSpan={7} sx={{ fontWeight: "bold", bgcolor: "#1a2a3a", color: "#90caf9", py: 1 }}>
                     🔧 System Processes ({grouped.system.length})
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
                 {grouped.system.map((p) => {
                   const isExpanded = expandedPid === p.pid;
                   return (
-                    <tr
+                    <TableRow
                       key={p.pid}
-                      className={`proc-row ${isExpanded ? "proc-row-expanded" : ""}`}
+                      hover
                       onClick={() => setExpandedPid(isExpanded ? null : p.pid)}
                       title={TYPE_TOOLTIPS[p.type] || "Click for details"}
-                      style={{ cursor: "pointer" }}
+                      sx={{ cursor: "pointer", bgcolor: isExpanded ? "action.selected" : "inherit" }}
                     >
-                      <td className="proc-pid" style={{ width: "72px" }}>{p.pid}</td>
-                      <td className="proc-type" style={{ width: "90px" }}>{TYPE_LABELS[p.type] || p.type}</td>
-                      <td className={`proc-num ${p.cpu > 20 ? "val-high" : p.cpu > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
-                        {p.cpu.toFixed(1)}
-                        <div className="proc-bar" style={{ width: `${Math.min(p.cpu, 100)}%` }} />
-                      </td>
-                      <td className={`proc-num ${p.mem > 10 ? "val-high" : p.mem > 5 ? "val-med" : ""}`} style={{ width: "80px" }}>
-                        {p.mem.toFixed(1)}
-                      </td>
-                      <td className="proc-num" style={{ width: "80px" }}>{Math.round(p.rss / 1024)} MB</td>
-                      <td className="proc-num" style={{ width: "72px" }}>{p.threads || "—"}</td>
-                      <td className="proc-num" style={{ width: "80px" }}>{fmtUptime(p.uptimeSec || 0)}</td>
-                    </tr>
+                      <TableCell>{p.pid}</TableCell>
+                      <TableCell>{TYPE_LABELS[p.type] || p.type}</TableCell>
+                      <TableCell align="right">
+                        <Box component="span" sx={{ color: p.cpu > 20 ? "error.main" : p.cpu > 5 ? "warning.main" : "inherit" }}>
+                          {p.cpu.toFixed(1)}
+                        </Box>
+                        <Box sx={{ width: `${Math.min(p.cpu, 100)}%`, height: 4, bgcolor: "primary.main", mt: 0.5, borderRadius: 1 }} />
+                      </TableCell>
+                      <TableCell align="right">
+                        <Box component="span" sx={{ color: p.mem > 10 ? "error.main" : p.mem > 5 ? "warning.main" : "inherit" }}>
+                          {p.mem.toFixed(1)}
+                        </Box>
+                      </TableCell>
+                      <TableCell align="right">{Math.round(p.rss / 1024)} MB</TableCell>
+                      <TableCell align="right">{p.threads || "—"}</TableCell>
+                      <TableCell align="right">{fmtUptime(p.uptimeSec || 0)}</TableCell>
+                    </TableRow>
                   );
                 })}
               </>
             )}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </TableContainer>
       {expandedPid && sorted.find((p) => p.pid === expandedPid) && (
         <DetailPanel p={sorted.find((p) => p.pid === expandedPid)} />
       )}
