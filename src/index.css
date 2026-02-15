@@ -123,6 +123,18 @@ p, li, ol, ul, strong {
   border-radius: 4px;
 }
 
+.info-box {
+  background: #1a2a3a;
+  border: 2px solid #4a9eff;
+  padding: 15px;
+  margin: 15px 0;
+  border-radius: 4px;
+  color: #e0e0e0;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
+}
+
 /* === Process Monitor === */
 .proc-summary {
   display: flex;
@@ -325,6 +337,9 @@ button {
   font-family: inherit;
   margin: 0;
   transition: all 0.2s;
+  user-select: text;
+  -webkit-user-select: text;
+  -moz-user-select: text;
 }
 
 button:hover {

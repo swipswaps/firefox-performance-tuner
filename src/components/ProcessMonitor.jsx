@@ -1,4 +1,18 @@
 import { useMemo, useState, useCallback, useEffect } from "react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Alert,
+  Card,
+  CardContent,
+  Typography,
+  Box,
+} from "@mui/material";
 
 const TYPE_LABELS = {
   main: "🦊 Main",
@@ -387,7 +401,7 @@ export default function ProcessMonitor({ processes }) {
             {grouped.main.length > 0 && (
               <>
                 <tr className="proc-group-header">
-                  <td colSpan={7} style={{ fontWeight: "bold", background: "#f0f0f0", padding: "8px" }}>
+                  <td colSpan={7} style={{ fontWeight: "bold", background: "#2a2a2a", color: "#e0e0e0", padding: "8px" }}>
                     🦊 Main Process ({grouped.main.length})
                   </td>
                 </tr>
@@ -423,7 +437,7 @@ export default function ProcessMonitor({ processes }) {
             {grouped["active-content"].length > 0 && (
               <>
                 <tr className="proc-group-header">
-                  <td colSpan={7} style={{ fontWeight: "bold", background: "#e8f5e9", padding: "8px" }}>
+                  <td colSpan={7} style={{ fontWeight: "bold", background: "#1a3a1a", color: "#90ee90", padding: "8px" }}>
                     📄 Active Content Processes ({grouped["active-content"].length})
                   </td>
                 </tr>
@@ -459,7 +473,7 @@ export default function ProcessMonitor({ processes }) {
             {grouped["idle-content"].length > 0 && (
               <>
                 <tr className="proc-group-header">
-                  <td colSpan={7} style={{ fontWeight: "bold", background: "#fff3e0", padding: "8px" }}>
+                  <td colSpan={7} style={{ fontWeight: "bold", background: "#3a2a1a", color: "#ffcc80", padding: "8px" }}>
                     💤 Idle Content Processes ({grouped["idle-content"].length}) - Preloaded or Suspended
                   </td>
                 </tr>
@@ -495,7 +509,7 @@ export default function ProcessMonitor({ processes }) {
             {grouped.system.length > 0 && (
               <>
                 <tr className="proc-group-header">
-                  <td colSpan={7} style={{ fontWeight: "bold", background: "#e3f2fd", padding: "8px" }}>
+                  <td colSpan={7} style={{ fontWeight: "bold", background: "#1a2a3a", color: "#90caf9", padding: "8px" }}>
                     🔧 System Processes ({grouped.system.length})
                   </td>
                 </tr>
