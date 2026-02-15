@@ -72,7 +72,7 @@ export default function AutoFix({ preferences, categories, showToast, onFixed })
       const response = await fetch("/api/external-players");
       const data = await response.json();
       setExternalPlayers(data);
-    } catch (error) {
+    } catch (_error) {
       showToast("❌ Failed to detect external players", "error", 3000);
     } finally {
       setLoadingPlayers(false);
