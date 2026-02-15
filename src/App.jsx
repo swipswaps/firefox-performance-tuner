@@ -1,4 +1,28 @@
 import { useState, useEffect, useCallback } from "react";
+import {
+  Tabs,
+  Tab,
+  Box,
+  Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  Button,
+  Card,
+  CardContent,
+  Typography,
+  CircularProgress,
+  AppBar,
+  Toolbar as MuiToolbar,
+  IconButton,
+  Fade,
+} from "@mui/material";
+import RefreshIcon from "@mui/icons-material/Refresh";
+import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import PauseIcon from "@mui/icons-material/Pause";
+import SettingsIcon from "@mui/icons-material/Settings";
 import SystemInfo from "./components/SystemInfo";
 import PreferencesPanel from "./components/PreferencesPanel";
 import ProcessMonitor from "./components/ProcessMonitor";
@@ -147,12 +171,21 @@ function App() {
 
   if (loading) {
     return (
-      <div className="container">
-        <div className="loading-screen">
-          <div className="loading-spinner" />
-          <p>Loading Firefox Performance Tuner...</p>
-        </div>
-      </div>
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100vh",
+          gap: 2,
+        }}
+      >
+        <CircularProgress size={60} thickness={4} />
+        <Typography variant="body1" color="text.secondary">
+          Loading Firefox Performance Tuner...
+        </Typography>
+      </Box>
     );
   }
 
@@ -160,25 +193,39 @@ function App() {
     <div className="container">
       <ToastContainer />
 
-      {confirmAction && (
-        <div className="confirm-overlay" onClick={() => setConfirmAction(null)}>
-          <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>{confirmAction.title}</h3>
-            <p>{confirmAction.message}</p>
-            <div className="confirm-buttons">
-              <button
-                className="btn-cancel"
-                onClick={() => setConfirmAction(null)}
-              >
+      <Dialog
+        open={!!confirmAction}
+        onClose={() => setConfirmAction(null)}
+        TransitionComponent={Fade}
+        PaperProps={{
+          sx: {
+            bgcolor: "background.paper",
+            backgroundImage: "none",
+          },
+        }}
+      >
+        {confirmAction && (
+          <>
+            <DialogTitle>{confirmAction.title}</DialogTitle>
+            <DialogContent>
+              <DialogContentText>{confirmAction.message}</DialogContentText>
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setConfirmAction(null)} color="inherit">
                 Cancel
-              </button>
-              <button className="btn-confirm" onClick={confirmAction.onConfirm}>
+              </Button>
+              <Button
+                onClick={confirmAction.onConfirm}
+                variant="contained"
+                color="primary"
+                autoFocus
+              >
                 {confirmAction.confirmLabel || "Confirm"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              </Button>
+            </DialogActions>
+          </>
+        )}
+      </Dialog>
 
       <header className="header">
         <div className="header-top">
@@ -195,25 +242,56 @@ function App() {
 
       <ServerStatus apiMode={apiMode} onRetry={checkApiMode} showToast={showToast} />
 
-      <nav className="tab-nav">
+      <Tabs
+        value={activeTab}
+        onChange={(e, newValue) => setActiveTab(newValue)}
+        variant="fullWidth"
+        sx={{
+          borderBottom: 1,
+          borderColor: "divider",
+          bgcolor: "#252525",
+        }}
+      >
         {TABS.map((tab) => (
-          <button
+          <Tab
             key={tab.id}
-            className={`tab-btn ${activeTab === tab.id ? "tab-active" : ""}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-            {tab.id === "prefs" && prefIssueCount > 0 && (
-              <span className="tab-badge">{prefIssueCount}</span>
-            )}
-          </button>
+            value={tab.id}
+            label={
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+                {tab.label}
+                {tab.id === "prefs" && prefIssueCount > 0 && (
+                  <Chip label={prefIssueCount} color="error" size="small" />
+                )}
+              </Box>
+            }
+            sx={{
+              textTransform: "none",
+              fontSize: "0.95rem",
+              fontWeight: 500,
+            }}
+          />
         ))}
-      </nav>
+      </Tabs>
 
-      <div className="toolbar">
-        <div className="toolbar-left">
-          <button
-            className={`btn-monitor ${isMonitoring ? "btn-active" : ""}`}
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          p: 1.5,
+          bgcolor: "#252525",
+          borderLeft: 1,
+          borderRight: 1,
+          borderColor: "#333",
+          gap: 2,
+          flexWrap: "wrap",
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Button
+            variant={isMonitoring ? "contained" : "outlined"}
+            color={isMonitoring ? "success" : "primary"}
+            startIcon={isMonitoring ? <PauseIcon /> : <PlayArrowIcon />}
             onClick={() => {
               setIsMonitoring(!isMonitoring);
               showToast(
@@ -223,22 +301,33 @@ function App() {
               );
             }}
           >
-            {isMonitoring ? "⏸ Pause" : "▶ Monitor"}
-          </button>
+            {isMonitoring ? "Pause" : "Monitor"}
+          </Button>
           <select
             className="interval-select"
             value={refreshInterval}
             onChange={(e) => setRefreshInterval(Number(e.target.value))}
+            style={{
+              padding: "8px 12px",
+              background: "#333",
+              color: "#e0e0e0",
+              border: "1px solid #555",
+              borderRadius: "6px",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
           >
             <option value={1}>1s</option>
             <option value={5}>5s</option>
             <option value={10}>10s</option>
             <option value={30}>30s</option>
           </select>
-        </div>
-        <div className="toolbar-right">
-          <button
-            className="btn-apply"
+        </Box>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <Button
+            variant="contained"
+            color="warning"
+            startIcon={<SettingsIcon />}
             onClick={() =>
               setConfirmAction({
                 title: "Apply All Optimized Preferences?",
@@ -249,43 +338,120 @@ function App() {
               })
             }
           >
-            ⚙️ Apply All Preferences
-          </button>
-          <button className="btn-refresh" onClick={fetchAll}>
-            🔄 Refresh
-          </button>
-        </div>
-      </div>
+            Apply All Preferences
+          </Button>
+          <IconButton color="primary" onClick={fetchAll} size="large">
+            <RefreshIcon />
+          </IconButton>
+        </Box>
+      </Box>
 
       <main className="tab-content">
         {activeTab === "overview" && (
           <>
-            <div className="overview-grid">
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+                gap: 2.5,
+              }}
+            >
               <SystemInfo data={systemInfo} />
-              <div className="overview-summary">
-                <div className="section">
-                  <div className="section-title">Quick Status</div>
-                  <div className="summary-cards">
-                    <div
-                      className={`summary-card ${prefIssueCount === 0 ? "card-ok" : "card-warn"}`}
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" gutterBottom>
+                    Quick Status
+                  </Typography>
+                  <Box
+                    sx={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(3, 1fr)",
+                      gap: 1.5,
+                      mt: 1.5,
+                    }}
+                  >
+                    <Card
+                      sx={{
+                        textAlign: "center",
+                        bgcolor:
+                          prefIssueCount === 0
+                            ? "rgba(74, 222, 128, 0.1)"
+                            : "rgba(251, 191, 36, 0.1)",
+                        borderColor:
+                          prefIssueCount === 0 ? "success.main" : "warning.main",
+                        borderWidth: 1,
+                        borderStyle: "solid",
+                      }}
                     >
-                      <div className="card-number">{prefIssueCount}</div>
-                      <div className="card-label">Pref Issues</div>
-                    </div>
-                    <div className="summary-card card-info">
-                      <div className="card-number">{processes.length}</div>
-                      <div className="card-label">Processes</div>
-                    </div>
-                    <div
-                      className={`summary-card ${logs.length === 0 ? "card-ok" : "card-warn"}`}
+                      <CardContent>
+                        <Typography
+                          variant="h3"
+                          sx={{
+                            color:
+                              prefIssueCount === 0
+                                ? "success.main"
+                                : "warning.main",
+                          }}
+                        >
+                          {prefIssueCount}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Pref Issues
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                    <Card
+                      sx={{
+                        textAlign: "center",
+                        bgcolor: "rgba(74, 158, 255, 0.1)",
+                        borderColor: "primary.main",
+                        borderWidth: 1,
+                        borderStyle: "solid",
+                      }}
                     >
-                      <div className="card-number">{logs.length}</div>
-                      <div className="card-label">GPU Delays</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+                      <CardContent>
+                        <Typography variant="h3" color="primary.main">
+                          {processes.length}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Processes
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                    <Card
+                      sx={{
+                        textAlign: "center",
+                        bgcolor:
+                          logs.length === 0
+                            ? "rgba(74, 222, 128, 0.1)"
+                            : "rgba(251, 191, 36, 0.1)",
+                        borderColor:
+                          logs.length === 0 ? "success.main" : "warning.main",
+                        borderWidth: 1,
+                        borderStyle: "solid",
+                      }}
+                    >
+                      <CardContent>
+                        <Typography
+                          variant="h3"
+                          sx={{
+                            color:
+                              logs.length === 0
+                                ? "success.main"
+                                : "warning.main",
+                          }}
+                        >
+                          {logs.length}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          GPU Delays
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Box>
 
             <AutoFix
               preferences={preferences}
