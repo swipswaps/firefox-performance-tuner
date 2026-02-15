@@ -4,6 +4,7 @@ import PreferencesPanel from "./components/PreferencesPanel";
 import ProcessMonitor from "./components/ProcessMonitor";
 import LogViewer from "./components/LogViewer";
 import UserJsEditor from "./components/UserJsEditor";
+import AutoFix from "./components/AutoFix";
 import ToastContainer, { showToast } from "./components/Toast";
 import StatusBadge from "./components/StatusBadge";
 import CopyButton from "./components/CopyButton";
@@ -284,6 +285,13 @@ function App() {
                 </div>
               </div>
             </div>
+
+            <AutoFix
+              preferences={preferences}
+              categories={prefCategories}
+              showToast={showToast}
+              onFixed={fetchAll}
+            />
 
             <div className="section" style={{ marginTop: "16px" }}>
               <div className="section-title">🧪 Performance Benchmark</div>

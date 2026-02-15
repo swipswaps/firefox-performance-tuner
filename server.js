@@ -127,6 +127,93 @@ const PREF_CATEGORIES = {
       description:
         "Enable software video decoding (ffvpx) — required when no hardware VA-API",
     },
+    "media.ffmpeg.vaapi.enabled": {
+      expected: "true",
+      description:
+        "Enable VA-API hardware video decoding — eliminates spinning wheel during video playback",
+    },
+    "media.rdd-process.enabled": {
+      expected: "true",
+      description:
+        "Enable Remote Data Decoder process — isolates media decoding for stability",
+    },
+    "media.av1.enabled": {
+      expected: "true",
+      description:
+        "Enable AV1 codec support — modern efficient video codec",
+    },
+    "media.navigator.mediadatadecoder_vpx_enabled": {
+      expected: "true",
+      description:
+        "Enable VP8/VP9 hardware decoding — set to false if green artifacts appear",
+    },
+    "media.autoplay.blocking_policy": {
+      expected: "0",
+      description:
+        "Don't block autoplay — prevents video loading delays (0=allow all)",
+    },
+    "media.block-autoplay-until-in-foreground": {
+      expected: "false",
+      description:
+        "Don't wait for foreground to play video — reduces buffering delays",
+    },
+    "media.suspend-bkgnd-video.enabled": {
+      expected: "true",
+      description:
+        "Suspend background video playback — saves CPU/battery when tab not visible",
+    },
+    "media.suspend-bkgnd-video.delay-ms": {
+      expected: "5000",
+      description:
+        "Delay before suspending background video (5 seconds) — prevents premature suspension",
+    },
+    "media.videocontrols.picture-in-picture.enabled": {
+      expected: "true",
+      description:
+        "Enable Picture-in-Picture — watch video while browsing other tabs",
+    },
+  },
+  "Tab Suspension & Background Management": {
+    "browser.tabs.unloadOnLowMemory": {
+      expected: "true",
+      description:
+        "Automatically unload tabs when memory is low — prevents system slowdown",
+    },
+    "browser.sessionstore.interval": {
+      expected: "60000",
+      description:
+        "Save session every 60 seconds (instead of 15s) — reduces disk writes",
+    },
+    "browser.sessionstore.max_tabs_undo": {
+      expected: "10",
+      description:
+        "Keep 10 closed tabs in undo history — balance between memory and convenience",
+    },
+    "dom.min_background_timeout_value": {
+      expected: "10000",
+      description:
+        "Throttle background tab timers to 10 seconds — drastically reduces CPU usage",
+    },
+    "dom.timeout.throttling_delay": {
+      expected: "30000",
+      description:
+        "Delay before throttling background timers (30s) — aggressive background tab suspension",
+    },
+    "dom.ipc.keepProcessesAlive.web": {
+      expected: "1",
+      description:
+        "Keep only 1 web content process alive when idle — reduces memory footprint",
+    },
+    "browser.tabs.remote.warmup.enabled": {
+      expected: "false",
+      description:
+        "Disable tab warmup — don't preload tabs, saves memory",
+    },
+    "browser.tabs.remote.warmup.maxTabs": {
+      expected: "0",
+      description:
+        "Don't warm up any tabs — prevents unnecessary resource usage",
+    },
   },
   Network: {
     "network.http.max-connections": {
@@ -1009,6 +1096,123 @@ app.post("/api/apply-preferences", async (req, res) => {
     } else {
       res.json({ message: "All preferences already present in user.js" });
     }
+  } catch (error) {
+    res.status(500).json(safeError(error));
+  }
+});
+
+// NEW: Auto-fix all preference issues (detects problems and applies fixes automatically)
+app.post("/api/auto-fix", async (req, res) => {
+  try {
+    if (await isFirefoxRunning()) {
+      return res
+        .status(409)
+        .json({
+          error:
+            "Close Firefox before auto-fixing — profile is locked while running",
+        });
+    }
+
+    const profilePath = await resolveProfile();
+    const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`;
+    const prefsFile = `${MOZILLA_DIR}/${profilePath}/prefs.js`;
+
+    // Read current preferences from prefs.js
+    let currentPrefs = {};
+    if (existsSync(prefsFile)) {
+      const content = await readFile(prefsFile, "utf-8");
+      const flatPrefs = getFlatPrefs();
+      for (const pref of Object.keys(flatPrefs)) {
+        const escaped = pref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const regex = new RegExp(`(?:user_)?pref\\("${escaped}",\\s*([^)]+)\\)`);
+        const match = content.match(regex);
+        if (match) {
+          currentPrefs[pref] = match[1].trim();
+        }
+      }
+    }
+
+    // Detect issues (preferences that don't match expected values)
+    const flatPrefs = getFlatPrefs();
+    const issues = [];
+    const fixes = [];
+
+    for (const [key, expected] of Object.entries(flatPrefs)) {
+      const actual = currentPrefs[key];
+      if (actual !== expected) {
+        issues.push({ pref: key, actual, expected });
+        fixes.push(`user_pref("${key}", ${expected});`);
+      }
+    }
+
+    if (issues.length === 0) {
+      return res.json({
+        success: true,
+        message: "No issues detected — all preferences are optimal",
+        issuesFixed: 0,
+        backupCreated: false,
+      });
+    }
+
+    // Create backup before applying fixes
+    const backupPath = await rotateBackups(userJsFile);
+
+    // Generate new user.js with all optimal preferences
+    const newContent = generateTemplate();
+
+    // Write the new user.js
+    await writeFile(userJsFile, newContent, "utf-8");
+
+    res.json({
+      success: true,
+      message: `Auto-fixed ${issues.length} preference issues`,
+      issuesFixed: issues.length,
+      issues: issues.map(i => i.pref),
+      backupCreated: true,
+      backupPath,
+      nextSteps: [
+        "Restart Firefox to apply changes",
+        "Verify preferences in about:config",
+        "Test video playback and tab performance",
+      ],
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// NEW: Detect external video players (VLC, MPV, Cinelerra)
+app.get("/api/external-players", async (req, res) => {
+  try {
+    const players = [];
+    const candidates = [
+      { name: "VLC", command: "vlc", args: ["--version"] },
+      { name: "MPV", command: "mpv", args: ["--version"] },
+      { name: "Cinelerra", command: "cinelerra", args: ["--version"] },
+      { name: "SMPlayer", command: "smplayer", args: ["--version"] },
+      { name: "Celluloid", command: "celluloid", args: ["--version"] },
+    ];
+
+    for (const player of candidates) {
+      try {
+        await execFileAsync(player.command, player.args, { timeout: 2000 });
+        players.push({
+          name: player.name,
+          command: player.command,
+          installed: true,
+        });
+      } catch (error) {
+        // Player not found, skip
+      }
+    }
+
+    res.json({
+      players,
+      count: players.length,
+      recommendation: players.length > 0
+        ? `Use ${players[0].name} for videos that stutter in Firefox`
+        : "Install VLC or MPV for better video playback fallback",
+    });
   } catch (error) {
     res.status(500).json(safeError(error));
   }
