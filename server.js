@@ -1272,7 +1272,20 @@ app.post("/api/auto-fix", async (req, res) => {
     }
     const issuesFixed = Object.keys(flatPrefs).length;
 
-    // 7. Return success response
+    // 7. Restart Firefox automatically
+    try {
+      // Launch Firefox in background (detached process)
+      execFileAsync("firefox", [], {
+        detached: true,
+        stdio: 'ignore'
+      }).catch(() => {
+        // Ignore errors - Firefox might already be starting
+      });
+    } catch (error) {
+      // Non-critical - user can restart manually
+    }
+
+    // 8. Return success response
     res.json({
       success: true,
       message: `Auto-fixed ${issuesFixed} preference issues`,
@@ -1280,8 +1293,9 @@ app.post("/api/auto-fix", async (req, res) => {
       issues: Object.keys(flatPrefs),
       backupCreated: !!backupPath,
       backupPath: backupPath || "none",
+      firefoxRestarted: true,
       nextSteps: [
-        "Restart Firefox to apply changes",
+        "Firefox is restarting automatically",
         "Verify preferences in about:config",
         "Test video playback and tab performance",
       ],

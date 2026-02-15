@@ -27,7 +27,8 @@ export default function AutoFix({ preferences, categories, showToast, onFixed })
       `✅ Automatically close Firefox (if running)\n` +
       `✅ Fix ${issueCount} preference issues\n` +
       `✅ Create automatic backup\n` +
-      `✅ Apply optimal settings for video playback and tab suspension\n\n` +
+      `✅ Apply optimal settings for video playback and tab suspension\n` +
+      `✅ Restart Firefox automatically\n\n` +
       `⚠️ Save any work in Firefox before continuing!\n\n` +
       `Continue?`
     );
