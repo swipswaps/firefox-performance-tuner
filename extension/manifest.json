@@ -1,0 +1,28 @@
+{
+  "manifest_version": 2,
+  "name": "Firefox Performance Tuner Bridge",
+  "version": "1.0.0",
+  "description": "Exposes Firefox process data to the Performance Tuner web app",
+  "permissions": [
+    "tabs",
+    "webNavigation",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://swipswaps.github.io/firefox-performance-tuner/*", "http://localhost:3000/*"],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "firefox-perf-tuner@swipswaps.github.io",
+      "strict_min_version": "109.0"
+    }
+  }
+}
+

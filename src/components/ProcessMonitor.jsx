@@ -173,24 +173,43 @@ export default function ProcessMonitor({ processes }) {
   const [sortKey, setSortKey] = useState("cpu");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedPid, setExpandedPid] = useState(null);
-  const [browserMemory, setBrowserMemory] = useState(null);
+  const [extensionProcesses, setExtensionProcesses] = useState(null);
+  const [bridgeAvailable, setBridgeAvailable] = useState(false);
 
-  // Get real browser memory data from Performance API
+  // Check if Firefox extension bridge is available and fetch process data
   useEffect(() => {
-    const updateMemory = () => {
-      if (performance.memory) {
-        setBrowserMemory({
-          usedJSHeapSize: performance.memory.usedJSHeapSize,
-          totalJSHeapSize: performance.memory.totalJSHeapSize,
-          jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
-        });
+    const checkBridge = () => {
+      if (window.firefoxProcessBridge?.isAvailable()) {
+        setBridgeAvailable(true);
+        fetchProcessData();
       }
     };
 
-    updateMemory();
-    const interval = setInterval(updateMemory, 1000);
-    return () => clearInterval(interval);
-  }, []);
+    const fetchProcessData = async () => {
+      if (window.firefoxProcessBridge) {
+        const data = await window.firefoxProcessBridge.getProcesses();
+        setExtensionProcesses(data);
+      }
+    };
+
+    // Listen for bridge ready event
+    window.addEventListener('firefoxProcessBridgeReady', checkBridge);
+
+    // Check immediately in case bridge already loaded
+    checkBridge();
+
+    // Poll for process data every 2 seconds if bridge available
+    const interval = setInterval(() => {
+      if (bridgeAvailable) {
+        fetchProcessData();
+      }
+    }, 2000);
+
+    return () => {
+      window.removeEventListener('firefoxProcessBridgeReady', checkBridge);
+      clearInterval(interval);
+    };
+  }, [bridgeAvailable]);
 
   const handleSort = useCallback(
     (key) => {
@@ -204,6 +223,9 @@ export default function ProcessMonitor({ processes }) {
     [sortKey],
   );
 
+  // Use extension processes if available, otherwise use backend processes
+  const activeProcesses = extensionProcesses || processes || [];
+
   // Group processes by classification
   const grouped = useMemo(() => {
     const groups = {
@@ -213,7 +235,7 @@ export default function ProcessMonitor({ processes }) {
       system: [],
     };
 
-    (processes || []).forEach((p) => {
+    activeProcesses.forEach((p) => {
       const classification = p.classification || "system";
       if (groups[classification]) {
         groups[classification].push(p);
@@ -240,7 +262,7 @@ export default function ProcessMonitor({ processes }) {
     });
 
     return groups;
-  }, [processes, sortKey, sortDir]);
+  }, [activeProcesses, sortKey, sortDir]);
 
   // Flatten for totals
   const sorted = useMemo(() => {
@@ -257,53 +279,39 @@ export default function ProcessMonitor({ processes }) {
   const totalThreads = sorted.reduce((s, p) => s + (p.threads || 0), 0);
 
   if (sorted.length === 0) {
-    // Demo mode: Show browser's own memory usage from Performance API
     return (
       <div className="section">
-        <div className="section-title">🔍 Firefox Processes (Demo Mode)</div>
-
-        {browserMemory && (
-          <div className="info-box" style={{ marginBottom: "16px" }}>
-            <p style={{ margin: "0 0 8px 0" }}>
-              <strong>📊 Current Tab Memory (Performance API):</strong>
-            </p>
-            <div className="proc-summary">
-              <span className="proc-stat">
-                JS Heap Used: <strong>{fmtBytes(browserMemory.usedJSHeapSize)}</strong>
-              </span>
-              <span className="proc-stat">
-                JS Heap Total: <strong>{fmtBytes(browserMemory.totalJSHeapSize)}</strong>
-              </span>
-              <span className="proc-stat">
-                JS Heap Limit: <strong>{fmtBytes(browserMemory.jsHeapSizeLimit)}</strong>
-              </span>
-            </div>
-          </div>
-        )}
+        <div className="section-title">🔍 Firefox Processes</div>
 
         <div className="info-box">
           <p style={{ margin: "0 0 8px 0" }}>
-            <strong>ℹ️ Demo Mode Limitations:</strong>
+            <strong>📦 Install Browser Extension for Live Process Data:</strong>
           </p>
           <p style={{ margin: "0 0 8px 0" }}>
-            This GitHub Pages deployment cannot access Firefox process data (requires backend server).
-            The Performance API above shows <strong>real memory usage</strong> for this tab only.
-          </p>
-          <p style={{ margin: "0 0 8px 0" }}>
-            <strong>To see full Firefox process monitoring:</strong>
+            To see Firefox process data on GitHub Pages, install the companion extension:
           </p>
           <ol style={{ margin: "0 0 8px 0", paddingLeft: "20px" }}>
-            <li>Clone the repo: <code>git clone https://github.com/swipswaps/firefox-performance-tuner.git</code></li>
-            <li>Install: <code>npm install</code></li>
-            <li>Run: <code>npm start</code></li>
+            <li>Download: <a href="https://github.com/swipswaps/firefox-performance-tuner/raw/master/extension.xpi" target="_blank" rel="noopener">extension.xpi</a></li>
+            <li>Open Firefox: <code>about:addons</code></li>
+            <li>Click gear icon → "Install Add-on From File"</li>
+            <li>Select downloaded <code>extension.xpi</code></li>
+            <li>Refresh this page</li>
+          </ol>
+          <p style={{ margin: "0 0 8px 0" }}>
+            <strong>Or run locally for full features:</strong>
+          </p>
+          <ol style={{ margin: "0 0 8px 0", paddingLeft: "20px" }}>
+            <li><code>git clone https://github.com/swipswaps/firefox-performance-tuner.git</code></li>
+            <li><code>cd firefox-performance-tuner && npm install</code></li>
+            <li><code>npm start</code></li>
           </ol>
           <p style={{ margin: "0 0 8px 0" }}>
             <strong>Or use Firefox's built-in tools:</strong>
           </p>
           <ul style={{ margin: 0, paddingLeft: "20px" }}>
-            <li>Task Manager: Press <kbd>Shift+Esc</kbd> to see all processes with tab URLs</li>
-            <li>about:processes: Type <code>about:processes</code> in address bar for detailed process view</li>
-            <li>about:memory: Type <code>about:memory</code> for memory breakdown</li>
+            <li>Task Manager: <kbd>Shift+Esc</kbd></li>
+            <li>Process List: <code>about:processes</code></li>
+            <li>Memory Details: <code>about:memory</code></li>
           </ul>
         </div>
       </div>
