@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect } from "react";
 
 const TYPE_LABELS = {
   main: "🦊 Main",
@@ -173,7 +173,24 @@ export default function ProcessMonitor({ processes }) {
   const [sortKey, setSortKey] = useState("cpu");
   const [sortDir, setSortDir] = useState("desc");
   const [expandedPid, setExpandedPid] = useState(null);
-  const [showIdleProcesses, setShowIdleProcesses] = useState(false);
+  const [browserMemory, setBrowserMemory] = useState(null);
+
+  // Get real browser memory data from Performance API
+  useEffect(() => {
+    const updateMemory = () => {
+      if (performance.memory) {
+        setBrowserMemory({
+          usedJSHeapSize: performance.memory.usedJSHeapSize,
+          totalJSHeapSize: performance.memory.totalJSHeapSize,
+          jsHeapSizeLimit: performance.memory.jsHeapSizeLimit,
+        });
+      }
+    };
+
+    updateMemory();
+    const interval = setInterval(updateMemory, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleSort = useCallback(
     (key) => {
@@ -240,10 +257,55 @@ export default function ProcessMonitor({ processes }) {
   const totalThreads = sorted.reduce((s, p) => s + (p.threads || 0), 0);
 
   if (sorted.length === 0) {
+    // Demo mode: Show browser's own memory usage from Performance API
     return (
       <div className="section">
-        <div className="section-title">🔍 Firefox Processes</div>
-        <p style={{ color: "#888" }}>Firefox not running</p>
+        <div className="section-title">🔍 Firefox Processes (Demo Mode)</div>
+
+        {browserMemory && (
+          <div className="info-box" style={{ marginBottom: "16px" }}>
+            <p style={{ margin: "0 0 8px 0" }}>
+              <strong>📊 Current Tab Memory (Performance API):</strong>
+            </p>
+            <div className="proc-summary">
+              <span className="proc-stat">
+                JS Heap Used: <strong>{fmtBytes(browserMemory.usedJSHeapSize)}</strong>
+              </span>
+              <span className="proc-stat">
+                JS Heap Total: <strong>{fmtBytes(browserMemory.totalJSHeapSize)}</strong>
+              </span>
+              <span className="proc-stat">
+                JS Heap Limit: <strong>{fmtBytes(browserMemory.jsHeapSizeLimit)}</strong>
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="info-box">
+          <p style={{ margin: "0 0 8px 0" }}>
+            <strong>ℹ️ Demo Mode Limitations:</strong>
+          </p>
+          <p style={{ margin: "0 0 8px 0" }}>
+            This GitHub Pages deployment cannot access Firefox process data (requires backend server).
+            The Performance API above shows <strong>real memory usage</strong> for this tab only.
+          </p>
+          <p style={{ margin: "0 0 8px 0" }}>
+            <strong>To see full Firefox process monitoring:</strong>
+          </p>
+          <ol style={{ margin: "0 0 8px 0", paddingLeft: "20px" }}>
+            <li>Clone the repo: <code>git clone https://github.com/swipswaps/firefox-performance-tuner.git</code></li>
+            <li>Install: <code>npm install</code></li>
+            <li>Run: <code>npm start</code></li>
+          </ol>
+          <p style={{ margin: "0 0 8px 0" }}>
+            <strong>Or use Firefox's built-in tools:</strong>
+          </p>
+          <ul style={{ margin: 0, paddingLeft: "20px" }}>
+            <li>Task Manager: Press <kbd>Shift+Esc</kbd> to see all processes with tab URLs</li>
+            <li>about:processes: Type <code>about:processes</code> in address bar for detailed process view</li>
+            <li>about:memory: Type <code>about:memory</code> for memory breakdown</li>
+          </ul>
+        </div>
       </div>
     );
   }
