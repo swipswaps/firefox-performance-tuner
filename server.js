@@ -272,6 +272,16 @@ function safeError(error) {
   return { error: msg.length > 200 ? "Operation failed" : msg };
 }
 
+// Dangerous preference values that will break Firefox
+const DANGEROUS_VALUES = {
+  "network.http.max-connections": { min: 1, max: 65535, reason: "0 disables all network access" },
+  "network.http.max-persistent-connections-per-server": { min: 1, max: 100, reason: "0 disables persistent connections" },
+  "dom.ipc.processCount": { min: 1, max: 64, reason: "0 prevents Firefox from starting" },
+  "dom.ipc.processCount.web": { min: 1, max: 64, reason: "0 prevents web content from loading" },
+  "browser.cache.memory.capacity": { min: 1024, max: 2097152, reason: "Too low causes crashes, too high exhausts memory" },
+  "media.memory_cache_max_size": { min: 1024, max: 2097152, reason: "Invalid values break media playback" },
+};
+
 /**
  * Validate user.js content with corruption prevention
  * Checks for:
@@ -280,6 +290,7 @@ function safeError(error) {
  * - Valid user_pref() calls only
  * - No shell injection attempts
  * - No dangerous characters
+ * - Dangerous preference values (NEW)
  */
 function validateUserJS(content) {
   if (typeof content !== "string")
@@ -329,6 +340,8 @@ function validateUserJS(content) {
     };
   }
 
+  const warnings = [];
+
   // Validate each line
   const lines = content.split("\n");
   for (let i = 0; i < lines.length; i++) {
@@ -370,12 +383,41 @@ function validateUserJS(content) {
         };
       }
     }
+
+    // NEW: Check for dangerous preference values
+    const prefMatch = line.match(/user_pref\("([^"]+)",\s*(-?\d+(?:\.\d+)?|true|false|"[^"]*")\);/);
+    if (prefMatch) {
+      const [, prefName, prefValue] = prefMatch;
+
+      if (DANGEROUS_VALUES[prefName]) {
+        const rule = DANGEROUS_VALUES[prefName];
+        const numValue = parseInt(prefValue, 10);
+
+        if (!isNaN(numValue)) {
+          if (numValue < rule.min || numValue > rule.max) {
+            return {
+              valid: false,
+              reason: `DANGEROUS: ${prefName} = ${numValue} will break Firefox!\n` +
+                      `Reason: ${rule.reason}\n` +
+                      `Allowed range: ${rule.min} to ${rule.max}`,
+            };
+          }
+        }
+      }
+
+      // Warn about unknown preferences (not in PREF_CATEGORIES)
+      const allKnownPrefs = Object.values(PREF_CATEGORIES).flatMap(cat => Object.keys(cat));
+      if (!allKnownPrefs.includes(prefName)) {
+        warnings.push(`Line ${i + 1}: Unknown preference "${prefName}" (typo or custom pref?)`);
+      }
+    }
   }
 
-  return { valid: true };
+  return { valid: true, warnings };
 }
 
 // Rotate backups — keep timestamped copies, prune to maxBackups (arkenfox pattern)
+// NEW: Verify backup is readable after creation
 async function rotateBackups(filePath, maxBackups = 5) {
   if (!existsSync(filePath)) return null;
 
@@ -384,7 +426,22 @@ async function rotateBackups(filePath, maxBackups = 5) {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const backupPath = path.join(dir, `${base}.backup-${timestamp}`);
 
+  // Create backup
   await copyFile(filePath, backupPath);
+
+  // NEW: Verify backup is readable and matches original
+  try {
+    const originalContent = await readFile(filePath, "utf-8");
+    const backupContent = await readFile(backupPath, "utf-8");
+
+    if (originalContent !== backupContent) {
+      throw new Error("Backup verification failed: content mismatch");
+    }
+  } catch (error) {
+    // If verification fails, delete bad backup and throw error
+    await unlink(backupPath).catch(() => {});
+    throw new Error(`Backup creation failed: ${error.message}`);
+  }
 
   // Prune old backups beyond maxBackups
   const files = await readdir(dir);
@@ -978,6 +1035,44 @@ app.get("/api/user-js", async (req, res) => {
   }
 });
 
+// NEW: Dry-run validation endpoint (validates WITHOUT writing)
+app.post("/api/user-js/validate", async (req, res) => {
+  try {
+    const { content } = req.body;
+    const validation = validateUserJS(content);
+
+    if (!validation.valid) {
+      return res.status(400).json({
+        valid: false,
+        error: validation.reason,
+        safe: false,
+      });
+    }
+
+    // Count preferences
+    const lines = content.split("\n");
+    const prefCount = lines.filter(line =>
+      line.trim().startsWith("user_pref(")
+    ).length;
+
+    // Check if Firefox is running (warning, not error)
+    const firefoxRunning = await isFirefoxRunning();
+
+    res.json({
+      valid: true,
+      safe: true,
+      prefCount,
+      warnings: validation.warnings || [],
+      firefoxRunning,
+      message: firefoxRunning
+        ? "⚠️ Close Firefox before applying changes"
+        : "✅ Safe to apply (validation passed)",
+    });
+  } catch (error) {
+    res.status(500).json(safeError(error));
+  }
+});
+
 // Save user.js content (with validation, Firefox check, backup rotation)
 app.post("/api/user-js", async (req, res) => {
   try {
@@ -1002,10 +1097,22 @@ app.post("/api/user-js", async (req, res) => {
     const backupPath = await rotateBackups(userJsFile);
 
     await writeFile(userJsFile, content, "utf-8");
+
+    const warnings = validation.warnings && validation.warnings.length > 0
+      ? `\n\nWarnings:\n${validation.warnings.join("\n")}`
+      : "";
+
     const msg = backupPath
-      ? "user.js saved! Backup created. Restart Firefox to apply."
-      : "user.js saved successfully! Restart Firefox to apply changes.";
-    res.json({ message: msg, path: userJsFile });
+      ? `✅ user.js saved! Backup created: ${path.basename(backupPath)}\n` +
+        `🔄 Restart Firefox to apply changes.${warnings}`
+      : `✅ user.js saved successfully!\n🔄 Restart Firefox to apply changes.${warnings}`;
+
+    res.json({
+      message: msg,
+      path: userJsFile,
+      backupPath,
+      warnings: validation.warnings || [],
+    });
   } catch (error) {
     res.status(500).json(safeError(error));
   }

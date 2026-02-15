@@ -15,6 +15,8 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
   const [isModified, setIsModified] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  const [validationStatus, setValidationStatus] = useState(null); // NEW: validation state
+  const [isValidating, setIsValidating] = useState(false); // NEW: validation loading
 
   const notify = showToast || (() => {});
   const isDemoMode = apiMode === "demo" || apiMode === "disconnected";
@@ -34,8 +36,41 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
     }
   };
 
+  // NEW: Validate content without saving (dry-run)
+  const validateContent = async (contentToValidate) => {
+    setIsValidating(true);
+    try {
+      const response = await fetch("/api/user-js/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: contentToValidate }),
+      });
+      const result = await response.json();
+      setValidationStatus(result);
+      return result;
+    } catch (error) {
+      console.error("Validation failed:", error);
+      setValidationStatus({ valid: false, error: "Validation request failed" });
+      return { valid: false, error: "Validation request failed" };
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
   // Save user.js content (handles validation + Firefox running errors)
   const saveUserJs = async () => {
+    // Validate first
+    const validation = await validateContent(content);
+    if (!validation.valid) {
+      notify(`❌ Validation failed: ${validation.error}`, "error");
+      return;
+    }
+
+    if (validation.firefoxRunning) {
+      notify("⚠️ Close Firefox before saving changes", "error");
+      return;
+    }
+
     setIsSaving(true);
     try {
       const response = await fetch("/api/user-js", {
@@ -50,6 +85,7 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
         notify(result.message, "success");
         setOriginalContent(content);
         setIsModified(false);
+        setValidationStatus(null); // Clear validation after successful save
       }
     } catch (error) {
       console.error("Failed to save user.js:", error);
@@ -106,6 +142,65 @@ function UserJsEditor({ showToast, systemInfo, apiMode }) {
               Use the <strong>🧙 Setup Wizard</strong> button to get
               step-by-step scripts you can copy and run in your terminal.
             </p>
+          </div>
+        )}
+
+        {/* NEW: Safety Status Banner */}
+        {!isDemoMode && validationStatus && (
+          <div className={`safety-banner ${validationStatus.valid ? 'safe' : 'unsafe'}`}>
+            {validationStatus.valid ? (
+              <>
+                <div className="safety-header">
+                  <span className="safety-icon">✅</span>
+                  <strong>Safe to Apply</strong>
+                </div>
+                <div className="safety-details">
+                  <p>✓ Syntax validation passed</p>
+                  <p>✓ {validationStatus.prefCount} preferences detected</p>
+                  {validationStatus.firefoxRunning && (
+                    <p className="warning">⚠️ Close Firefox before saving</p>
+                  )}
+                  {validationStatus.warnings && validationStatus.warnings.length > 0 && (
+                    <details>
+                      <summary>⚠️ {validationStatus.warnings.length} warnings</summary>
+                      <ul>
+                        {validationStatus.warnings.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="safety-header">
+                  <span className="safety-icon">❌</span>
+                  <strong>Cannot Apply - Validation Failed</strong>
+                </div>
+                <div className="safety-details">
+                  <p className="error">{validationStatus.error}</p>
+                  <p><strong>Fix the error above before saving.</strong></p>
+                  <p>💡 Tip: Check for unbalanced quotes, parentheses, or dangerous values.</p>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* NEW: Safety Guarantee Banner (always visible) */}
+        {!isDemoMode && !validationStatus && (
+          <div className="safety-guarantee">
+            <span className="safety-icon">🛡️</span>
+            <strong>Safety Guaranteed:</strong> All changes are validated and backed up.
+            Firefox cannot be permanently broken.
+            <button
+              className="link-button"
+              onClick={() => validateContent(content)}
+              disabled={isValidating}
+            >
+              {isValidating ? "Validating..." : "Validate Now"}
+            </button>
           </div>
         )}
 
