@@ -1101,86 +1101,6 @@ app.post("/api/apply-preferences", async (req, res) => {
   }
 });
 
-// NEW: Auto-fix all preference issues (detects problems and applies fixes automatically)
-app.post("/api/auto-fix", async (req, res) => {
-  try {
-    if (await isFirefoxRunning()) {
-      return res
-        .status(409)
-        .json({
-          error:
-            "Close Firefox before auto-fixing — profile is locked while running",
-        });
-    }
-
-    const profilePath = await resolveProfile();
-    const userJsFile = `${MOZILLA_DIR}/${profilePath}/user.js`;
-    const prefsFile = `${MOZILLA_DIR}/${profilePath}/prefs.js`;
-
-    // Read current preferences from prefs.js
-    let currentPrefs = {};
-    if (existsSync(prefsFile)) {
-      const content = await readFile(prefsFile, "utf-8");
-      const flatPrefs = getFlatPrefs();
-      for (const pref of Object.keys(flatPrefs)) {
-        const escaped = pref.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const regex = new RegExp(`(?:user_)?pref\\("${escaped}",\\s*([^)]+)\\)`);
-        const match = content.match(regex);
-        if (match) {
-          currentPrefs[pref] = match[1].trim();
-        }
-      }
-    }
-
-    // Detect issues (preferences that don't match expected values)
-    const flatPrefs = getFlatPrefs();
-    const issues = [];
-    const fixes = [];
-
-    for (const [key, expected] of Object.entries(flatPrefs)) {
-      const actual = currentPrefs[key];
-      if (actual !== expected) {
-        issues.push({ pref: key, actual, expected });
-        fixes.push(`user_pref("${key}", ${expected});`);
-      }
-    }
-
-    if (issues.length === 0) {
-      return res.json({
-        success: true,
-        message: "No issues detected — all preferences are optimal",
-        issuesFixed: 0,
-        backupCreated: false,
-      });
-    }
-
-    // Create backup before applying fixes
-    const backupPath = await rotateBackups(userJsFile);
-
-    // Generate new user.js with all optimal preferences
-    const newContent = generateTemplate();
-
-    // Write the new user.js
-    await writeFile(userJsFile, newContent, "utf-8");
-
-    res.json({
-      success: true,
-      message: `Auto-fixed ${issues.length} preference issues`,
-      issuesFixed: issues.length,
-      issues: issues.map(i => i.pref),
-      backupCreated: true,
-      backupPath,
-      nextSteps: [
-        "Restart Firefox to apply changes",
-        "Verify preferences in about:config",
-        "Test video playback and tab performance",
-      ],
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // NEW: Detect external video players (VLC, MPV, Cinelerra)
 app.get("/api/external-players", async (req, res) => {
   try {
@@ -1218,16 +1138,23 @@ app.get("/api/external-players", async (req, res) => {
   }
 });
 
-// NEW: Auto-fix all preference issues (one-click fix)
+// NEW: Auto-fix all preference issues (one-click fix with auto-close and auto-restart)
 app.post("/api/auto-fix", async (req, res) => {
   try {
     // 1. Close Firefox if running
     if (await isFirefoxRunning()) {
       try {
-        // Kill all Firefox processes
-        await execFileAsync("pkill", ["-9", "firefox"], { timeout: 5000 });
-        // Wait for processes to fully terminate
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Kill all Firefox processes (graceful first, then force)
+        try {
+          await execFileAsync("pkill", ["firefox"], { timeout: 3000 });
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch {
+          // Graceful kill failed, force kill
+          await execFileAsync("pkill", ["-9", "firefox"], { timeout: 3000 });
+        }
+
+        // Wait for processes to fully terminate and profile to unlock
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Verify Firefox is actually closed
         if (await isFirefoxRunning()) {
@@ -1263,6 +1190,9 @@ app.post("/api/auto-fix", async (req, res) => {
     // 5. Write user.js
     await writeFile(userJsFile, content, "utf-8");
 
+    // Wait for filesystem to flush (ensures user.js is fully written)
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
     // 6. Count issues fixed (all preferences in PREF_CATEGORIES)
     const flatPrefs = {};
     for (const cat of Object.values(PREF_CATEGORIES)) {
@@ -1274,6 +1204,9 @@ app.post("/api/auto-fix", async (req, res) => {
 
     // 7. Restart Firefox automatically with the tuner URL
     try {
+      // Wait a bit more before restarting to ensure clean profile state
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
       // Launch Firefox with the tuner page (detached process)
       // This allows user to continue using the tool immediately
       execFileAsync("firefox", ["http://localhost:3000"], {
