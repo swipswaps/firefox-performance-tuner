@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./AutoFix.css";
 
 export default function AutoFix({ preferences, categories, showToast, onFixed }) {
@@ -74,10 +74,17 @@ export default function AutoFix({ preferences, categories, showToast, onFixed })
       setExternalPlayers(data);
     } catch (_error) {
       showToast("❌ Failed to detect external players", "error", 3000);
+      // Set empty result on error so UI shows "no players found" instead of button
+      setExternalPlayers({ players: [], count: 0, recommendation: "Install VLC or MPV for better video playback fallback" });
     } finally {
       setLoadingPlayers(false);
     }
   };
+
+  // Auto-detect external players on component mount
+  useEffect(() => {
+    detectExternalPlayers();
+  }, []);
 
   return (
     <div className="auto-fix-panel">

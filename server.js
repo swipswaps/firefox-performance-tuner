@@ -1115,22 +1115,23 @@ app.get("/api/external-players", async (req, res) => {
   try {
     const players = [];
     const candidates = [
-      { name: "VLC", command: "vlc", args: ["--version"] },
-      { name: "MPV", command: "mpv", args: ["--version"] },
-      { name: "Cinelerra", command: "cinelerra", args: ["--version"] },
-      { name: "SMPlayer", command: "smplayer", args: ["--version"] },
-      { name: "Celluloid", command: "celluloid", args: ["--version"] },
+      { name: "VLC", command: "vlc" },
+      { name: "MPV", command: "mpv" },
+      { name: "Cinelerra", command: "cinelerra" },
+      { name: "SMPlayer", command: "smplayer" },
+      { name: "Celluloid", command: "celluloid" },
     ];
 
     for (const player of candidates) {
       try {
-        await execFileAsync(player.command, player.args, { timeout: 2000 });
+        // Use 'which' command for fast, reliable detection
+        await execFileAsync("which", [player.command], { timeout: 1000 });
         players.push({
           name: player.name,
           command: player.command,
           installed: true,
         });
-      } catch (error) {
+      } catch (_error) {
         // Player not found, skip
       }
     }
