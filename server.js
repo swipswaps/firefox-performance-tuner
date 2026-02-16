@@ -1148,6 +1148,96 @@ app.get("/api/external-players", async (req, res) => {
   }
 });
 
+// NEW: Play video URL in external player (VLC/MPV)
+app.post("/api/play-in-external-player", async (req, res) => {
+  try {
+    const { url, player } = req.body;
+
+    // Input validation
+    if (!url || typeof url !== "string") {
+      return res.status(400).json({ error: "Video URL is required" });
+    }
+
+    if (!player || !["vlc", "mpv"].includes(player.toLowerCase())) {
+      return res.status(400).json({ error: "Player must be 'vlc' or 'mpv'" });
+    }
+
+    // URL validation (basic check for http/https)
+    if (!url.match(/^https?:\/\/.+/i)) {
+      return res.status(400).json({ error: "Invalid video URL (must start with http:// or https://)" });
+    }
+
+    const playerCommand = player.toLowerCase();
+
+    // Verify player is installed
+    try {
+      await execFileAsync("which", [playerCommand], { timeout: 1000 });
+    } catch (_error) {
+      return res.status(404).json({
+        error: `${player.toUpperCase()} is not installed`,
+        recommendation: `Install ${player.toUpperCase()} to use this feature`,
+      });
+    }
+
+    // Detect if URL is from YouTube or other streaming sites that need yt-dlp
+    const isYouTube = /youtube\.com|youtu\.be|googlevideo\.com/i.test(url);
+    const isStreamingSite = /vimeo\.com|dailymotion\.com|twitch\.tv/i.test(url);
+    const needsYtDlp = isYouTube || isStreamingSite;
+
+    let args = [];
+
+    if (needsYtDlp) {
+      // Check if yt-dlp is installed
+      let ytDlpPath = null;
+      try {
+        const { stdout } = await execFileAsync("which", ["yt-dlp"], { timeout: 1000 });
+        ytDlpPath = stdout.trim();
+      } catch (_error) {
+        // yt-dlp not found, try youtube-dl
+        try {
+          const { stdout } = await execFileAsync("which", ["youtube-dl"], { timeout: 1000 });
+          ytDlpPath = stdout.trim();
+        } catch (_error2) {
+          return res.status(404).json({
+            error: "yt-dlp or youtube-dl is required for YouTube/streaming videos",
+            recommendation: "Install yt-dlp: pip install yt-dlp",
+          });
+        }
+      }
+
+      // For YouTube URLs, pass the original page URL (not the direct video URL)
+      // and let yt-dlp handle the extraction
+      if (playerCommand === "vlc") {
+        // VLC doesn't have built-in yt-dlp support, so we need to extract the URL first
+        // and pass it to VLC. For now, we'll use a simpler approach.
+        args = [url];
+      } else if (playerCommand === "mpv") {
+        // MPV has built-in yt-dlp support via --ytdl flag
+        args = ["--ytdl", "--ytdl-format=best", url];
+      }
+    } else {
+      // Direct video URL (mp4, webm, etc.)
+      args = [url];
+    }
+
+    // Launch player with video URL (detached process so it doesn't block)
+    execFile(playerCommand, args, {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+
+    res.json({
+      success: true,
+      player: player.toUpperCase(),
+      message: `${player.toUpperCase()} launched with video URL`,
+      url: url.substring(0, 100) + (url.length > 100 ? "..." : ""), // Truncate long URLs in response
+      usedYtDlp: needsYtDlp,
+    });
+  } catch (error) {
+    res.status(500).json(safeError(error));
+  }
+});
+
 // NEW: Auto-fix all preference issues (one-click fix with auto-close and auto-restart)
 app.post("/api/auto-fix", async (req, res) => {
   try {

@@ -6,6 +6,8 @@ export default function AutoFix({ preferences, categories, showToast, onFixed })
   const [result, setResult] = useState(null);
   const [externalPlayers, setExternalPlayers] = useState(null);
   const [loadingPlayers, setLoadingPlayers] = useState(false);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [playingVideo, setPlayingVideo] = useState(false);
 
   // Calculate issue count
   const flatPrefs = {};
@@ -86,6 +88,35 @@ export default function AutoFix({ preferences, categories, showToast, onFixed })
     detectExternalPlayers();
   }, []);
 
+  const playInExternalPlayer = async (player) => {
+    if (!videoUrl.trim()) {
+      showToast("❌ Please enter a video URL", "error", 3000);
+      return;
+    }
+
+    setPlayingVideo(true);
+    try {
+      const response = await fetch("/api/play-in-external-player", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: videoUrl.trim(), player }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to launch player");
+      }
+
+      showToast(`✅ ${data.player} launched successfully!`, "success", 3000);
+      setVideoUrl(""); // Clear input after successful launch
+    } catch (error) {
+      showToast(`❌ ${error.message}`, "error", 5000);
+    } finally {
+      setPlayingVideo(false);
+    }
+  };
+
   return (
     <div className="auto-fix-panel">
       <div className="auto-fix-header">
@@ -147,7 +178,7 @@ export default function AutoFix({ preferences, categories, showToast, onFixed })
       <div className="external-players-section">
         <h4>🎬 External Video Player Fallback</h4>
         <p>For videos that stutter in Firefox, use an external player</p>
-        
+
         {!externalPlayers && (
           <button
             className="btn-detect-players"
@@ -171,6 +202,33 @@ export default function AutoFix({ preferences, categories, showToast, onFixed })
                   ))}
                 </ul>
                 <p className="players-tip">💡 {externalPlayers.recommendation}</p>
+
+                <div className="video-url-input-section">
+                  <h5>🎥 Play Video in External Player</h5>
+                  <p className="input-hint">
+                    Right-click video in Firefox → Copy Video URL → Paste below
+                  </p>
+                  <input
+                    type="text"
+                    className="video-url-input"
+                    placeholder="https://example.com/video.mp4"
+                    value={videoUrl}
+                    onChange={(e) => setVideoUrl(e.target.value)}
+                    disabled={playingVideo}
+                  />
+                  <div className="player-buttons">
+                    {externalPlayers.players.map((player, i) => (
+                      <button
+                        key={i}
+                        className="btn-play-external"
+                        onClick={() => playInExternalPlayer(player.command)}
+                        disabled={playingVideo || !videoUrl.trim()}
+                      >
+                        {playingVideo ? "🔄 Launching..." : `▶️ Open in ${player.name}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="players-none">
