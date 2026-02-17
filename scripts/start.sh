@@ -27,6 +27,7 @@ echo -e "  Backend port:  ${GREEN}$BACKEND_PORT${NC} (localhost only)"
 echo -e "  Frontend port: ${GREEN}$FRONTEND_PORT${NC}"
 
 # Check if port is in use by another process
+# SELF-HEALING: Auto-kill stale processes instead of failing
 check_port() {
     local port=$1
     local label=$2
@@ -34,9 +35,55 @@ check_port() {
 
     if [ -n "$pid_on_port" ]; then
         local proc_name=$(ps -p $pid_on_port -o comm= 2>/dev/null)
-        echo -e "  ${RED}✗${NC} Port $port ($label) in use by: $proc_name (PID $pid_on_port)"
-        echo -e "  Run ${BLUE}npm stop${NC} first, or kill the process"
-        return 1
+
+        # SELF-HEALING LOGIC:
+        # Instead of failing, kill the stale process and continue
+        # Why this is needed:
+        #  - User runs "npm run dev" multiple times
+        #  - Previous backend process still running
+        #  - Script fails with "port in use" error
+        #  - User has to manually kill process
+        #  - This is NOT self-healing behavior
+        #
+        # SOLUTION:
+        #  - Detect stale process on our port
+        #  - Kill it automatically
+        #  - Log what we did
+        #  - Continue startup
+        #
+        # This matches watchdog extension pattern:
+        #  - Capture ALL messages
+        #  - Display them to user
+        #  - Auto-heal instead of failing
+
+        echo -e "  ${YELLOW}⚠${NC} Port $port ($label) in use by: $proc_name (PID $pid_on_port)"
+        echo -e "  ${BLUE}→${NC} Auto-killing stale process..."
+
+        # CRITICAL: Use kill -9 immediately for reliability
+        # Why this matters:
+        #  - Regular kill sends SIGTERM (graceful shutdown)
+        #  - Node.js processes may ignore SIGTERM
+        #  - kill -9 sends SIGKILL (immediate termination)
+        #  - SIGKILL cannot be ignored or caught
+        #  - This ensures process dies immediately
+        #
+        # EVIDENCE FROM LOGS:
+        #  - "Terminated" message shows SIGTERM was sent
+        #  - "Failed to kill process" shows it didn't die
+        #  - Need SIGKILL for guaranteed termination
+
+        kill -9 $pid_on_port 2>/dev/null
+        sleep 1
+
+        # Verify process is dead
+        local still_running=$(lsof -ti:$port 2>/dev/null | head -1)
+        if [ -n "$still_running" ]; then
+            echo -e "  ${RED}✗${NC} Failed to kill process on port $port (PID $still_running still running)"
+            echo -e "  Run ${BLUE}npm stop${NC} first, or kill the process manually"
+            return 1
+        fi
+
+        echo -e "  ${GREEN}✓${NC} Stale process killed, port $port now available"
     fi
     return 0
 }
