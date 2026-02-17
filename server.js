@@ -1544,13 +1544,35 @@ function startResumableDownload(id, url, playerCommand) {
 
     console.log(`[download-${id}] [POLL] Checking file...`);
 
-    // Check if file exists yet
-    if (!existsSync(outputFile)) {
-      console.log(`[download-${id}] [POLL] File does not exist yet`);
+    /**
+     * CRITICAL FIX: Check for both final file AND temp file
+     *
+     * ROOT CAUSE OF EXIT CODE 1:
+     *  - yt-dlp downloads to /tmp/youtube-ID.mp4.part FIRST
+     *  - Then runs ffmpeg faststart post-processing
+     *  - Then moves to /tmp/youtube-ID.mp4
+     *  - Player launches when file doesn't exist yet → exit code 1
+     *
+     * SOLUTION:
+     *  - Check for .part file existence
+     *  - Only launch player when FINAL file exists (not .part)
+     *  - This ensures faststart processing is complete
+     */
+    const partFile = `${outputFile}.part`;
+    const finalExists = existsSync(outputFile);
+    const partExists = existsSync(partFile);
+
+    if (!finalExists && !partExists) {
+      console.log(`[download-${id}] [POLL] File does not exist yet (neither final nor .part)`);
       return;
     }
 
-    // Get current file size
+    if (!finalExists && partExists) {
+      console.log(`[download-${id}] [POLL] Download in progress (.part file exists, waiting for faststart processing)`);
+      return;
+    }
+
+    // Get current file size (final file exists)
     const size = statSync(outputFile).size;
 
     console.log(`[download-${id}] File size: ${(size / 1024 / 1024).toFixed(2)} MB`);
@@ -1583,6 +1605,12 @@ function startResumableDownload(id, url, playerCommand) {
        *  - Player may show "Network error when attempting to fetch resource"
        *  - Playback may stall when download speed drops
        *  - Seeking may fail during progressive playback
+       *
+       * CRITICAL FIX: Capture stderr to diagnose exit code 1 failures
+       *  - Previous code used stdio: "ignore" which hid error messages
+       *  - Player was spawning then immediately exiting with code 1
+       *  - No way to diagnose root cause without stderr
+       *  - Now capture stderr and log it when player exits with error
        */
       const playerProc = spawn(playerCommand, [
         "--force-seekable=yes",
@@ -1594,7 +1622,7 @@ function startResumableDownload(id, url, playerCommand) {
         outputFile
       ], {
         detached: true,  // Run independently of Node.js process
-        stdio: "ignore"  // Don't capture player output
+        stdio: ["ignore", "ignore", "pipe"]  // Capture stderr for error diagnosis
       });
 
       /**
@@ -1602,13 +1630,39 @@ function startResumableDownload(id, url, playerCommand) {
        *
        * Monitor player lifecycle to detect early exits
        * Early exit (within 3 seconds) indicates buffering issue
+       *
+       * CRITICAL: Capture stderr to diagnose exit code 1
+       *  - Player was exiting immediately with code 1
+       *  - No error message visible with stdio: "ignore"
+       *  - Now capture and log stderr when player fails
        */
+      let playerStderr = "";
+
+      if (playerProc.stderr) {
+        playerProc.stderr.on("data", (data) => {
+          playerStderr += data.toString();
+        });
+      }
+
       playerProc.on("spawn", () => {
         console.log(`[download-${id}] [player] Spawned successfully`);
       });
 
       playerProc.on("exit", (code) => {
         console.log(`[download-${id}] [player] Exited with code ${code}`);
+
+        /**
+         * CRITICAL: Log stderr when player exits with error
+         *
+         * Why this is essential:
+         *  - Exit code 1 = failure, but we don't know WHY
+         *  - Could be: missing DISPLAY, file not found, codec error, etc.
+         *  - Without stderr, impossible to diagnose
+         *  - This prevents silent failures
+         */
+        if (code !== 0 && playerStderr) {
+          console.error(`[download-${id}] [player] stderr: ${playerStderr.trim()}`);
+        }
       });
 
       /**
