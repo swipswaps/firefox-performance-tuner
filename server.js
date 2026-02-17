@@ -2,8 +2,9 @@ import express from "express";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { readFile, writeFile, copyFile, readdir, unlink } from "fs/promises";
-import { existsSync } from "fs";
+import { existsSync, readdirSync, statSync } from "fs";
 import path from "path";
+import { tmpdir } from "os";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { diffLines } from "diff";
@@ -1148,6 +1149,262 @@ app.get("/api/external-players", async (req, res) => {
   }
 });
 
+// ============================================================================
+// YOUTUBE DOWNLOAD PIPELINE - HARDENED YT-DLP IMPLEMENTATION
+// ============================================================================
+
+/**
+ * VERIFY BINARY EXISTS
+ *
+ * Purpose: Check if a command-line tool is installed and accessible
+ * Why: We need yt-dlp and ffmpeg to download and merge YouTube videos
+ * Returns: true if binary exists, false otherwise
+ */
+async function verifyBinaryExists(binary) {
+  try {
+    await execFileAsync("which", [binary]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * VERIFY YT-DLP VERSION
+ *
+ * Purpose: Log yt-dlp version for debugging
+ * Why: Old versions cause 403 errors on YouTube downloads
+ * Returns: version string
+ */
+async function verifyYtDlpVersion() {
+  const { stdout } = await execFileAsync("yt-dlp", ["--version"]);
+  console.log("[yt-dlp] version:", stdout.trim());
+  return stdout.trim();
+}
+
+/**
+ * VERIFY FFMPEG EXISTS
+ *
+ * Purpose: Confirm ffmpeg is available for video/audio merging
+ * Why: yt-dlp uses ffmpeg to merge separate video+audio streams into single MP4
+ * Returns: ffmpeg version output
+ */
+async function verifyFfmpeg() {
+  const { stdout } = await execFileAsync("ffmpeg", ["-version"]);
+  console.log("[ffmpeg] detected");
+  return stdout;
+}
+
+/**
+ * DOWNLOAD YOUTUBE VIDEO TO LOCAL FILE
+ *
+ * Purpose: Download YouTube video as complete MP4 file (not streaming manifest)
+ *
+ * Why this approach works:
+ *  1. Forces progressive MP4 format (not HLS fragments that expire)
+ *  2. Merges audio + video using ffmpeg into single file
+ *  3. Avoids time-limited authentication tokens on HLS manifests
+ *  4. Retries fragments if network issues occur
+ *  5. Falls back to browser cookies if 403 errors occur
+ *
+ * Format selector explained:
+ *  - "bv*[ext=mp4]+ba[ext=m4a]" = best video (mp4) + best audio (m4a), merge them
+ *  - "/b[ext=mp4]" = fallback to progressive MP4 if DASH not available
+ *
+ * Returns: absolute path to downloaded MP4 file
+ * Throws: Error if download fails or file not found
+ */
+async function downloadYouTubeVideo(url) {
+
+  // STEP 1: Verify required tools are installed
+  if (!(await verifyBinaryExists("yt-dlp"))) {
+    throw new Error("yt-dlp not installed. Install with: pip install yt-dlp");
+  }
+
+  if (!(await verifyBinaryExists("ffmpeg"))) {
+    throw new Error("ffmpeg not installed. Install with: sudo dnf install ffmpeg");
+  }
+
+  // Log versions for debugging
+  await verifyYtDlpVersion();
+  await verifyFfmpeg();
+
+  // STEP 2: Prepare download location
+  const tempDir = tmpdir(); // Usually /tmp on Linux
+
+  /**
+   * Output template uses %(id)s so filename is deterministic per video ID
+   * Example: youtube-dQw4w9WgXcQ.mp4
+   * This prevents duplicate downloads of same video
+   */
+  const outputTemplate = path.join(tempDir, "youtube-%(id)s.%(ext)s");
+
+  // STEP 3: Build yt-dlp command arguments
+  const args = [
+    /**
+     * Format selector strategy (CRITICAL FIX):
+     *
+     * Problem: "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]" was selecting HLS format 96
+     *          which has time-limited authentication tokens → HTTP 403 Forbidden
+     *
+     * Solution: Explicitly exclude HLS/m3u8 protocols and prefer progressive MP4
+     *
+     * Format selector breakdown:
+     *  1. "18" = Progressive MP4 (640x360) with video+audio combined (no merge needed)
+     *  2. "/" = Fallback separator
+     *  3. "bv*[ext=mp4][protocol!=m3u8]+ba[ext=m4a][protocol!=m3u8]" =
+     *     Best video (mp4, not HLS) + best audio (m4a, not HLS), merge them
+     *  4. "/" = Fallback separator
+     *  5. "b[ext=mp4][protocol!=m3u8]" = Any progressive MP4 (not HLS)
+     *
+     * Why format 18 first:
+     *  - No merging required (faster)
+     *  - No authentication tokens (reliable)
+     *  - Good quality for most use cases (640x360)
+     *  - Always available on YouTube
+     */
+    "-f", "18/bv*[ext=mp4][protocol!=m3u8]+ba[ext=m4a][protocol!=m3u8]/b[ext=mp4][protocol!=m3u8]",
+
+    // Merge output to single MP4 file (requires ffmpeg)
+    "--merge-output-format", "mp4",
+
+    // Don't create .part files (avoids partial file confusion)
+    "--no-part",
+
+    // Retry logic for network issues
+    "--retries", "10",              // Retry entire download 10 times
+    "--fragment-retries", "10",     // Retry individual fragments 10 times
+    "--concurrent-fragments", "5",  // Download 5 fragments in parallel
+
+    // Suppress update warning (we know it's old, system package manager controls it)
+    "--no-update",
+
+    // Output file path
+    "-o", outputTemplate,
+
+    // YouTube URL
+    url
+  ];
+
+  console.log("[yt-dlp] Executing:", "yt-dlp", args.join(" "));
+
+  // STEP 4: Execute download (first attempt without cookies)
+  try {
+    const { stdout, stderr } = await execFileAsync("yt-dlp", args, {
+      timeout: 120000 // 2 minute timeout
+    });
+
+    console.log("[yt-dlp] stdout:", stdout);
+    if (stderr) console.log("[yt-dlp] stderr:", stderr);
+
+  } catch (err) {
+
+    console.error("[yt-dlp] Initial download failed:", err.message);
+
+    /**
+     * FALLBACK: If 403 Forbidden error, retry with browser cookies
+     *
+     * Why: Some videos require authentication (age-restricted, region-locked)
+     * How: yt-dlp can extract cookies from Firefox browser
+     *
+     * We only use cookies as fallback, not by default, because:
+     *  - Adds latency
+     *  - Requires Firefox to be installed
+     *  - Most videos don't need it
+     */
+    if (err.stderr && err.stderr.includes("403")) {
+
+      console.log("[yt-dlp] Retrying with Firefox cookies...");
+
+      const retryArgs = [
+        "--cookies-from-browser", "firefox",
+        ...args
+      ];
+
+      try {
+        const { stdout, stderr } = await execFileAsync("yt-dlp", retryArgs, {
+          timeout: 120000
+        });
+
+        console.log("[yt-dlp] Retry stdout:", stdout);
+        if (stderr) console.log("[yt-dlp] Retry stderr:", stderr);
+
+      } catch (retryErr) {
+        // Both attempts failed, throw error
+        throw new Error(`yt-dlp failed: ${retryErr.message}`);
+      }
+
+    } else {
+      // Not a 403 error, throw original error
+      throw err;
+    }
+  }
+
+  // STEP 5: Verify downloaded file exists and is valid
+  /**
+   * Find all youtube-*.mp4 files in /tmp
+   * Sort by modification time (newest first)
+   * Verify file size > 1MB (sanity check)
+   */
+  const files = readdirSync(tempDir)
+    .filter(f => f.startsWith("youtube-") && f.endsWith(".mp4"))
+    .map(f => ({
+      file: f,
+      full: path.join(tempDir, f),
+      size: statSync(path.join(tempDir, f)).size,
+      mtime: statSync(path.join(tempDir, f)).mtime.getTime()
+    }))
+    .sort((a, b) => b.mtime - a.mtime); // Newest first
+
+  if (!files.length) {
+    throw new Error("Download completed but no MP4 file found in /tmp");
+  }
+
+  const latest = files[0];
+
+  // Sanity check: file should be at least 1MB
+  if (latest.size < 1024 * 1024) {
+    throw new Error(`Downloaded file suspiciously small: ${latest.size} bytes`);
+  }
+
+  console.log("[yt-dlp] ✅ Verified file:", latest.full);
+  console.log("[yt-dlp] ✅ Size:", (latest.size / 1024 / 1024).toFixed(2), "MB");
+
+  return latest.full; // Return absolute path to MP4 file
+}
+
+/**
+ * LAUNCH EXTERNAL PLAYER WITH LOCAL FILE
+ *
+ * Purpose: Start VLC or MPV with downloaded video file
+ *
+ * Why detached + unref:
+ *  - detached: Player runs independently of Node.js process
+ *  - stdio: "ignore": Don't capture player output (prevents hanging)
+ *  - unref(): Allow Node.js to exit even if player still running
+ *
+ * Returns: Process ID of launched player
+ */
+async function launchPlayer(playerCommand, filePath) {
+
+  console.log("[player] Launching:", playerCommand, filePath);
+
+  const child = execFile(playerCommand, [filePath], {
+    detached: true,
+    stdio: "ignore"
+  });
+
+  child.unref();
+
+  console.log("[player] ✅ Launched PID:", child.pid);
+
+  return child.pid;
+}
+
+// ============================================================================
+// API ENDPOINT - PLAY VIDEO IN EXTERNAL PLAYER
+// ============================================================================
+
 // NEW: Play video URL in external player (VLC/MPV)
 app.post("/api/play-in-external-player", async (req, res) => {
   try {
@@ -1184,44 +1441,40 @@ app.post("/api/play-in-external-player", async (req, res) => {
     const isStreamingSite = /vimeo\.com|dailymotion\.com|twitch\.tv/i.test(url);
     const needsYtDlp = isYouTube || isStreamingSite;
 
-    let args = [];
-
+    // YOUTUBE/STREAMING SITE HANDLING - Use hardened download pipeline
     if (needsYtDlp) {
-      // Check if yt-dlp is installed
-      let ytDlpPath = null;
-      try {
-        const { stdout } = await execFileAsync("which", ["yt-dlp"], { timeout: 1000 });
-        ytDlpPath = stdout.trim();
-      } catch (_error) {
-        // yt-dlp not found, try youtube-dl
-        try {
-          const { stdout } = await execFileAsync("which", ["youtube-dl"], { timeout: 1000 });
-          ytDlpPath = stdout.trim();
-        } catch (_error2) {
-          return res.status(404).json({
-            error: "yt-dlp or youtube-dl is required for YouTube/streaming videos",
-            recommendation: "Install yt-dlp: pip install yt-dlp",
-          });
-        }
-      }
 
-      // For YouTube URLs, pass the original page URL (not the direct video URL)
-      // and let yt-dlp handle the extraction
-      if (playerCommand === "vlc") {
-        // VLC doesn't have built-in yt-dlp support, so we need to extract the URL first
-        // and pass it to VLC. For now, we'll use a simpler approach.
-        args = [url];
-      } else if (playerCommand === "mpv") {
-        // MPV has built-in yt-dlp support via --ytdl flag
-        args = ["--ytdl", "--ytdl-format=best", url];
+      try {
+
+        // Download YouTube video to local /tmp file using hardened pipeline
+        const localFile = await downloadYouTubeVideo(url);
+
+        // Launch player with local file (no streaming, no authentication issues)
+        const pid = await launchPlayer(playerCommand, localFile);
+
+        return res.json({
+          success: true,
+          player: player.toUpperCase(),
+          message: `${player.toUpperCase()} launched with downloaded video`,
+          file: localFile,
+          playerPid: pid,
+          usedYtDlp: true
+        });
+
+      } catch (error) {
+
+        console.error("[youtube-playback-error]", error);
+
+        return res.status(500).json({
+          success: false,
+          error: error.message,
+          recommendation: "Check server logs for details. Ensure yt-dlp and ffmpeg are installed."
+        });
       }
-    } else {
-      // Direct video URL (mp4, webm, etc.)
-      args = [url];
     }
 
-    // Launch player with video URL (detached process so it doesn't block)
-    execFile(playerCommand, args, {
+    // DIRECT URL HANDLING - For non-YouTube URLs (direct MP4, etc.)
+    execFile(playerCommand, [url], {
       detached: true,
       stdio: "ignore",
     }).unref();
@@ -1231,7 +1484,7 @@ app.post("/api/play-in-external-player", async (req, res) => {
       player: player.toUpperCase(),
       message: `${player.toUpperCase()} launched with video URL`,
       url: url.substring(0, 100) + (url.length > 100 ? "..." : ""), // Truncate long URLs in response
-      usedYtDlp: needsYtDlp,
+      usedYtDlp: false,
     });
   } catch (error) {
     res.status(500).json(safeError(error));
