@@ -1,5 +1,5 @@
 import express from "express";
-import { execFile } from "child_process";
+import { execFile, spawn } from "child_process";
 import { promisify } from "util";
 import { readFile, writeFile, copyFile, readdir, unlink } from "fs/promises";
 import { existsSync, readdirSync, statSync } from "fs";
@@ -12,6 +12,41 @@ import { diffLines } from "diff";
 const execFileAsync = promisify(execFile);
 
 const app = express();
+
+// ============================================================================
+// ACTIVE DOWNLOAD REGISTRY
+// ============================================================================
+
+/**
+ * ACTIVE DOWNLOAD REGISTRY
+ *
+ * Purpose: Track all in-progress YouTube downloads for:
+ *  - Resume support (continue partial downloads after interruption)
+ *  - Cancellation (kill yt-dlp process on user request)
+ *  - Progress tracking (real-time download percentage)
+ *  - Stall detection (identify stuck downloads)
+ *
+ * Data structure:
+ *  Map<downloadId, {
+ *    process: ChildProcess,      // yt-dlp process handle
+ *    progress: number,            // Download percentage (0-100)
+ *    filePath: string,            // Absolute path to MP4 file
+ *    lastUpdate: number,          // Timestamp of last progress update
+ *    url: string,                 // Original YouTube URL
+ *    playerPid: number|null       // MPV/VLC process ID (if launched)
+ *  }>
+ *
+ * Why Map instead of Object:
+ *  - Faster iteration for stall detection
+ *  - Cleaner API (has/get/set/delete)
+ *  - No prototype pollution risk
+ *
+ * Lifecycle:
+ *  1. Entry created when download starts
+ *  2. Updated every time yt-dlp emits progress
+ *  3. Deleted when download completes or is cancelled
+ */
+const activeDownloads = new Map();
 
 // === SECURITY BASELINE (OWASP + Express best practices) ===
 app.disable("x-powered-by");
@@ -1150,7 +1185,7 @@ app.get("/api/external-players", async (req, res) => {
 });
 
 // ============================================================================
-// YOUTUBE DOWNLOAD PIPELINE - HARDENED YT-DLP IMPLEMENTATION
+// YOUTUBE DOWNLOAD PIPELINE - RESUMABLE + PROGRESS-AWARE IMPLEMENTATION
 // ============================================================================
 
 /**
@@ -1167,6 +1202,279 @@ async function verifyBinaryExists(binary) {
   } catch {
     return false;
   }
+}
+
+/**
+ * START RESUMABLE DOWNLOAD WITH PROGRESSIVE PLAYBACK
+ *
+ * Purpose: Download YouTube video with support for:
+ *  - Resume (continue partial downloads after interruption)
+ *  - Real-time progress tracking
+ *  - Early playback (launch player before download completes)
+ *  - Cancellation (kill download on user request)
+ *
+ * How it works:
+ *  1. Start yt-dlp with --continue flag (resumes partial files)
+ *  2. Use --newline flag to get structured progress output
+ *  3. Parse progress percentage from stdout
+ *  4. Store process handle in activeDownloads registry
+ *  5. Monitor file size and launch player when threshold reached
+ *  6. Continue download in background while player runs
+ *
+ * Why this approach:
+ *  - UX: User waits 3-6 seconds instead of 30-60 seconds
+ *  - Reliability: Partial downloads can be resumed after network issues
+ *  - Observability: Real-time progress tracking for front-end
+ *  - Control: Downloads can be cancelled via API
+ *
+ * Inspired by:
+ *  - Torrent streaming clients (Peerflix, WebTorrent)
+ *  - Modern download managers (aria2, wget --continue)
+ *  - mpv growing-file playback support
+ *
+ * @param {string} id - Unique download identifier (timestamp or UUID)
+ * @param {string} url - YouTube video URL
+ * @param {string} playerCommand - Player executable ("mpv" or "vlc")
+ * @returns {string} - Absolute path to output MP4 file
+ */
+function startResumableDownload(id, url, playerCommand) {
+
+  // STEP 1: Determine output file path
+  /**
+   * Use deterministic filename based on download ID
+   * This allows resume to work - same ID = same file
+   *
+   * Example: /tmp/youtube-1708167890123.mp4
+   */
+  const outputFile = path.join(tmpdir(), `youtube-${id}.mp4`);
+
+  console.log(`[download-${id}] Starting resumable download`);
+  console.log(`[download-${id}] Output: ${outputFile}`);
+
+  // STEP 2: Build yt-dlp command arguments
+  const args = [
+    /**
+     * Format selector (same as before):
+     * - Prefer format 18 (progressive MP4, no HLS)
+     * - Fallback to DASH with protocol!=m3u8
+     * - Avoids HTTP 403 Forbidden errors
+     */
+    "-f", "18/bv*[ext=mp4][protocol!=m3u8]+ba[ext=m4a][protocol!=m3u8]/b[ext=mp4][protocol!=m3u8]",
+
+    /**
+     * Merge output to single MP4 file
+     */
+    "--merge-output-format", "mp4",
+
+    /**
+     * CRITICAL: Resume support
+     *
+     * --continue flag tells yt-dlp to:
+     *  - Check if output file already exists
+     *  - If exists and incomplete, resume from last byte
+     *  - If exists and complete, skip download
+     *
+     * This enables:
+     *  - Network interruption recovery
+     *  - Server restart recovery
+     *  - Manual pause/resume workflow
+     */
+    "--continue",
+
+    /**
+     * CRITICAL: Structured progress output
+     *
+     * --newline flag tells yt-dlp to:
+     *  - Print each progress update on a new line
+     *  - Makes parsing easier (no carriage returns)
+     *
+     * Without this flag:
+     *  - Progress updates overwrite same line with \r
+     *  - Harder to parse in Node.js streams
+     */
+    "--newline",
+
+    /**
+     * Suppress update warning
+     * (We know yt-dlp is old, system package manager controls it)
+     */
+    "--no-update",
+
+    /**
+     * Output file path
+     */
+    "-o", outputFile,
+
+    /**
+     * YouTube URL
+     */
+    url
+  ];
+
+  console.log(`[download-${id}] Executing: yt-dlp ${args.join(" ")}`);
+
+  // STEP 3: Spawn yt-dlp process
+  /**
+   * Use spawn() instead of execFile() because:
+   *  - We need to stream stdout/stderr in real-time
+   *  - Download may take minutes (exceeds execFile timeout)
+   *  - We need process handle for cancellation
+   *
+   * spawn() returns ChildProcess object with:
+   *  - stdout/stderr streams
+   *  - kill() method for cancellation
+   *  - exit event for completion detection
+   */
+  const proc = spawn("yt-dlp", args);
+
+  // STEP 4: Register download in active registry
+  /**
+   * Store download metadata for:
+   *  - Progress tracking (updated from stdout parser)
+   *  - Cancellation (need process handle)
+   *  - Stall detection (need lastUpdate timestamp)
+   *  - API queries (need filePath and URL)
+   */
+  activeDownloads.set(id, {
+    process: proc,
+    progress: 0,
+    filePath: outputFile,
+    lastUpdate: Date.now(),
+    url: url,
+    playerPid: null
+  });
+
+  // STEP 5: Parse progress from stdout
+  /**
+   * yt-dlp progress lines look like:
+   * [download]  23.4% of 12.34MiB at 1.23MiB/s ETA 00:10
+   * [download]  45.6% of 12.34MiB at 2.34MiB/s ETA 00:05
+   * [download] 100.0% of 12.34MiB at 3.45MiB/s
+   *
+   * We extract the percentage using regex
+   */
+  proc.stdout.on("data", data => {
+    const text = data.toString();
+
+    // Log raw output for debugging
+    console.log(`[download-${id}] ${text.trim()}`);
+
+    /**
+     * Regex explanation:
+     *  (\d+\.\d+)% - Capture group for decimal number followed by %
+     *  Example matches: "23.4%", "100.0%", "0.1%"
+     */
+    const match = text.match(/(\d+\.\d+)%/);
+
+    if (match) {
+      const percent = parseFloat(match[1]);
+
+      // Update registry with new progress
+      const entry = activeDownloads.get(id);
+      if (entry) {
+        entry.progress = percent;
+        entry.lastUpdate = Date.now(); // Reset stall timer
+
+        console.log(`[download-${id}] Progress: ${percent.toFixed(1)}%`);
+      }
+    }
+  });
+
+  // STEP 6: Log errors from stderr
+  /**
+   * yt-dlp writes warnings and errors to stderr
+   * We log them but don't treat warnings as fatal
+   */
+  proc.stderr.on("data", data => {
+    console.log(`[download-${id}] stderr: ${data.toString().trim()}`);
+  });
+
+  // STEP 7: Handle process completion
+  /**
+   * When yt-dlp exits:
+   *  - Remove from active registry
+   *  - Log exit code (0 = success, non-zero = error)
+   */
+  proc.on("close", code => {
+    console.log(`[download-${id}] Process exited with code ${code}`);
+    activeDownloads.delete(id);
+  });
+
+  // STEP 8: Progressive playback - launch player when file reaches threshold
+  /**
+   * Poll file size every 1 second
+   * Once file > 5MB, launch player
+   * Continue download in background
+   *
+   * Why 5MB threshold:
+   *  - Enough data for player to start buffering
+   *  - Small enough for fast startup (3-6 seconds)
+   *  - Typical for 360p/480p progressive MP4
+   */
+  const MIN_PLAYABLE_SIZE = 5 * 1024 * 1024; // 5MB
+  let playerStarted = false;
+
+  const pollInterval = setInterval(() => {
+
+    // Check if file exists yet
+    if (!existsSync(outputFile)) return;
+
+    // Get current file size
+    const size = statSync(outputFile).size;
+
+    console.log(`[download-${id}] File size: ${(size / 1024 / 1024).toFixed(2)} MB`);
+
+    // Launch player once threshold reached
+    if (size > MIN_PLAYABLE_SIZE && !playerStarted) {
+
+      console.log(`[download-${id}] Threshold reached, launching player`);
+
+      /**
+       * mpv flags for growing-file playback:
+       *
+       * --force-seekable=yes
+       *   - Treat file as seekable even though it's growing
+       *   - Allows user to seek within downloaded portion
+       *
+       * --cache=yes
+       *   - Enable read-ahead cache
+       *   - Prevents stalls if download speed drops
+       *
+       * --cache-secs=20
+       *   - Buffer 20 seconds of video
+       *   - Safety margin for network fluctuations
+       */
+      const playerProc = spawn(playerCommand, [
+        "--force-seekable=yes",
+        "--cache=yes",
+        "--cache-secs=20",
+        outputFile
+      ], {
+        detached: true,  // Run independently of Node.js process
+        stdio: "ignore"  // Don't capture player output
+      });
+
+      playerProc.unref(); // Allow Node.js to exit even if player running
+
+      // Store player PID in registry
+      const entry = activeDownloads.get(id);
+      if (entry) {
+        entry.playerPid = playerProc.pid;
+      }
+
+      console.log(`[download-${id}] Player launched with PID ${playerProc.pid}`);
+
+      playerStarted = true;
+    }
+
+  }, 1000); // Poll every 1 second
+
+  // Stop polling when download completes
+  proc.on("close", () => {
+    clearInterval(pollInterval);
+  });
+
+  return outputFile;
 }
 
 /**
@@ -1402,6 +1710,191 @@ async function launchPlayer(playerCommand, filePath) {
 }
 
 // ============================================================================
+// STALL DETECTION WATCHDOG
+// ============================================================================
+
+/**
+ * STALL DETECTION WATCHDOG
+ *
+ * Purpose: Automatically detect and terminate stalled downloads
+ *
+ * How it works:
+ *  - Runs every 10 seconds
+ *  - Checks all active downloads
+ *  - If no progress update for 30 seconds → download is stalled
+ *  - Kills stalled process and removes from registry
+ *
+ * Why 30 seconds:
+ *  - YouTube may pause between fragments (normal)
+ *  - Network may have temporary slowdown (normal)
+ *  - 30 seconds is long enough to avoid false positives
+ *  - 30 seconds is short enough to detect real stalls
+ *
+ * What causes stalls:
+ *  - Network disconnection
+ *  - YouTube rate limiting
+ *  - Disk full
+ *  - yt-dlp bug/crash
+ *
+ * Why kill instead of retry:
+ *  - Prevents zombie processes
+ *  - User can manually retry with resume support
+ *  - Avoids infinite retry loops
+ *
+ * Production enhancement ideas:
+ *  - Add automatic retry with exponential backoff
+ *  - Send notification to front-end
+ *  - Log stall reason for analytics
+ */
+setInterval(() => {
+
+  const now = Date.now();
+
+  // Iterate through all active downloads
+  for (const [id, entry] of activeDownloads.entries()) {
+
+    // Calculate time since last progress update
+    const timeSinceUpdate = now - entry.lastUpdate;
+
+    // Check if stalled (no update for 30 seconds)
+    if (timeSinceUpdate > 30000) {
+
+      console.warn(`[STALL DETECTED] Download ${id} stalled for ${(timeSinceUpdate / 1000).toFixed(0)}s`);
+      console.warn(`[STALL DETECTED] Last progress: ${entry.progress.toFixed(1)}%`);
+      console.warn(`[STALL DETECTED] File: ${entry.filePath}`);
+      console.warn(`[STALL DETECTED] Terminating process...`);
+
+      // Kill the stalled yt-dlp process
+      /**
+       * SIGTERM = graceful termination signal
+       * Allows yt-dlp to clean up partial files
+       * Better than SIGKILL which force-kills immediately
+       */
+      entry.process.kill("SIGTERM");
+
+      // Remove from active registry
+      activeDownloads.delete(id);
+
+      console.warn(`[STALL DETECTED] Download ${id} terminated and removed from registry`);
+    }
+  }
+
+}, 10000); // Run every 10 seconds
+
+// ============================================================================
+// API ENDPOINTS - DOWNLOAD MANAGEMENT
+// ============================================================================
+
+/**
+ * GET DOWNLOAD PROGRESS
+ *
+ * Purpose: Query real-time download progress for front-end progress bar
+ *
+ * Request: GET /api/download-progress/:id
+ * Response: {
+ *   progress: number,      // 0-100 percentage
+ *   file: string,          // Absolute path to MP4 file
+ *   lastUpdate: number,    // Timestamp of last progress update
+ *   playerPid: number|null // Player process ID (if launched)
+ * }
+ *
+ * If download not found (completed or cancelled):
+ *   { progress: 100, done: true }
+ *
+ * Front-end usage:
+ *   Poll this endpoint every 1 second to update progress bar
+ *   Stop polling when progress === 100 or done === true
+ */
+app.get("/api/download-progress/:id", (req, res) => {
+
+  const id = req.params.id;
+  const entry = activeDownloads.get(id);
+
+  // Download not found (completed or cancelled)
+  if (!entry) {
+    return res.json({
+      progress: 100,
+      done: true
+    });
+  }
+
+  // Return current progress
+  return res.json({
+    progress: entry.progress,
+    file: entry.filePath,
+    lastUpdate: entry.lastUpdate,
+    playerPid: entry.playerPid,
+    url: entry.url
+  });
+});
+
+/**
+ * CANCEL DOWNLOAD
+ *
+ * Purpose: Allow user to cancel in-progress download
+ *
+ * Request: POST /api/cancel-download
+ * Body: { id: string }
+ * Response: { success: true, cancelled: string }
+ *
+ * What happens:
+ *  1. Find download in active registry
+ *  2. Send SIGTERM to yt-dlp process
+ *  3. Remove from registry
+ *  4. Partial file remains on disk (can be resumed later)
+ *
+ * Why keep partial file:
+ *  - User may want to resume later
+ *  - Saves bandwidth (don't re-download same bytes)
+ *  - Disk space is cheap
+ *
+ * Front-end usage:
+ *   Add "Cancel" button next to progress bar
+ *   Call this endpoint when clicked
+ *   Hide progress bar after successful cancellation
+ */
+app.post("/api/cancel-download", (req, res) => {
+
+  const { id } = req.body;
+
+  // Validate input
+  if (!id) {
+    return res.status(400).json({
+      success: false,
+      error: "Download ID is required"
+    });
+  }
+
+  const entry = activeDownloads.get(id);
+
+  // Download not found
+  if (!entry) {
+    return res.status(404).json({
+      success: false,
+      error: "Download not found (may have already completed or been cancelled)"
+    });
+  }
+
+  console.log(`[cancel-download] Cancelling download ${id}`);
+  console.log(`[cancel-download] Progress was: ${entry.progress.toFixed(1)}%`);
+  console.log(`[cancel-download] File: ${entry.filePath}`);
+
+  // Kill the yt-dlp process
+  entry.process.kill("SIGTERM");
+
+  // Remove from registry
+  activeDownloads.delete(id);
+
+  console.log(`[cancel-download] Download ${id} cancelled successfully`);
+
+  return res.json({
+    success: true,
+    cancelled: id,
+    message: "Download cancelled. Partial file preserved for resume."
+  });
+});
+
+// ============================================================================
 // API ENDPOINT - PLAY VIDEO IN EXTERNAL PLAYER
 // ============================================================================
 
@@ -1441,24 +1934,72 @@ app.post("/api/play-in-external-player", async (req, res) => {
     const isStreamingSite = /vimeo\.com|dailymotion\.com|twitch\.tv/i.test(url);
     const needsYtDlp = isYouTube || isStreamingSite;
 
-    // YOUTUBE/STREAMING SITE HANDLING - Use hardened download pipeline
+    // YOUTUBE/STREAMING SITE HANDLING - Use resumable progressive download
     if (needsYtDlp) {
+
+      /**
+       * PROGRESSIVE PLAYBACK WORKFLOW:
+       *
+       * 1. Generate unique download ID (timestamp)
+       * 2. Start resumable download in background
+       * 3. Return immediately (don't block API response)
+       * 4. Download monitors file size and launches player when ready
+       * 5. Front-end polls /api/download-progress/:id for updates
+       *
+       * UX improvement:
+       *  - Old approach: User waits 30-60 seconds for full download
+       *  - New approach: User waits 3-6 seconds for playback to start
+       *
+       * Why this works:
+       *  - Progressive MP4 downloads sequentially (moov atom at start)
+       *  - mpv can play growing files with --force-seekable
+       *  - Download continues in background while playing
+       */
 
       try {
 
-        // Download YouTube video to local /tmp file using hardened pipeline
-        const localFile = await downloadYouTubeVideo(url);
+        // Verify yt-dlp is installed
+        if (!(await verifyBinaryExists("yt-dlp"))) {
+          return res.status(404).json({
+            success: false,
+            error: "yt-dlp not installed",
+            recommendation: "Install yt-dlp: pip install yt-dlp"
+          });
+        }
 
-        // Launch player with local file (no streaming, no authentication issues)
-        const pid = await launchPlayer(playerCommand, localFile);
+        // Generate unique download ID
+        /**
+         * Use timestamp as ID for simplicity
+         * Production enhancement: Use UUID for better uniqueness
+         */
+        const downloadId = Date.now().toString();
 
+        // Start resumable download (non-blocking)
+        /**
+         * This function:
+         *  - Spawns yt-dlp process
+         *  - Registers in activeDownloads map
+         *  - Monitors progress and launches player
+         *  - Returns immediately (doesn't await completion)
+         */
+        const filePath = startResumableDownload(downloadId, url, playerCommand);
+
+        // Return success immediately
+        /**
+         * Front-end should:
+         *  1. Display "Starting download..." message
+         *  2. Poll /api/download-progress/:downloadId every 1 second
+         *  3. Update progress bar
+         *  4. Show "Playing..." when playerPid is set
+         */
         return res.json({
           success: true,
+          id: downloadId,
+          file: filePath,
           player: player.toUpperCase(),
-          message: `${player.toUpperCase()} launched with downloaded video`,
-          file: localFile,
-          playerPid: pid,
-          usedYtDlp: true
+          message: "Download started. Player will launch automatically when ready.",
+          resumable: true,
+          progressive: true
         });
 
       } catch (error) {
@@ -1468,7 +2009,7 @@ app.post("/api/play-in-external-player", async (req, res) => {
         return res.status(500).json({
           success: false,
           error: error.message,
-          recommendation: "Check server logs for details. Ensure yt-dlp and ffmpeg are installed."
+          recommendation: "Check server logs for details. Ensure yt-dlp is installed."
         });
       }
     }
