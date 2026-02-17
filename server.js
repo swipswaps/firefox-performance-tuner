@@ -1506,10 +1506,25 @@ function startResumableDownload(id, url, playerCommand) {
     /**
      * Require 10 seconds of buffered video
      * Example: 1 MiB/s download speed → 10 MB threshold
+     *
+     * CRITICAL FIX: Cap at 15MB maximum
+     * Why?
+     *  - Fast downloads (3+ MiB/s) would compute 30+ MB threshold
+     *  - Many YouTube videos are only 15-20 MB total
+     *  - Player would never launch if threshold > file size
+     *  - 15MB is enough buffer for any reasonable bitrate
+     *
+     * Example scenarios:
+     *  - 0.5 MiB/s → 5 MB threshold (10 seconds)
+     *  - 1.0 MiB/s → 10 MB threshold (10 seconds)
+     *  - 3.0 MiB/s → 15 MB threshold (capped, ~5 seconds)
+     *  - 10 MiB/s → 15 MB threshold (capped, ~1.5 seconds)
      */
-    const threshold = estimatedBitrate * 10;
+    const computed = estimatedBitrate * 10;
+    const MAX_THRESHOLD = 15 * 1024 * 1024; // 15MB cap
+    const threshold = Math.min(computed, MAX_THRESHOLD);
 
-    console.log(`[download-${id}] Computed threshold: ${(threshold / 1024 / 1024).toFixed(2)} MB (10 seconds of buffer)`);
+    console.log(`[download-${id}] Computed threshold: ${(computed / 1024 / 1024).toFixed(2)} MB → capped at ${(threshold / 1024 / 1024).toFixed(2)} MB`);
 
     return threshold;
   }
@@ -1527,8 +1542,13 @@ function startResumableDownload(id, url, playerCommand) {
    */
   const pollInterval = setInterval(() => {
 
+    console.log(`[download-${id}] [POLL] Checking file...`);
+
     // Check if file exists yet
-    if (!existsSync(outputFile)) return;
+    if (!existsSync(outputFile)) {
+      console.log(`[download-${id}] [POLL] File does not exist yet`);
+      return;
+    }
 
     // Get current file size
     const size = statSync(outputFile).size;
