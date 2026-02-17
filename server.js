@@ -1585,9 +1585,18 @@ function startResumableDownload(id, url, playerCommand) {
       console.log(`[download-${id}] Threshold reached, launching player`);
 
       /**
-       * STRONGER MPV BUFFERING FLAGS
+       * PLAYER-SPECIFIC FLAGS
        *
-       * Launch player with hardened flags for progressive playback:
+       * CRITICAL: MPV and VLC have DIFFERENT command-line syntax
+       *
+       * ROOT CAUSE OF VLC EXIT CODE 1:
+       *  - VLC doesn't support mpv flags like --force-seekable=yes
+       *  - Error: "vlc: unknown option or missing mandatory argument"
+       *  - Previous code used same flags for both players
+       *
+       * SOLUTION: Separate flag sets per player
+       *
+       * MPV FLAGS (progressive playback hardening):
        *  --force-seekable=yes         : Treat file as seekable even while growing
        *  --cache=yes                  : Enable cache buffering
        *  --cache-secs=30              : Buffer 30 seconds (increased from 20)
@@ -1595,32 +1604,41 @@ function startResumableDownload(id, url, playerCommand) {
        *  --demuxer-readahead-secs=20  : Readahead smooths progressive playback
        *  --no-terminal                : Suppress terminal output
        *
-       * Why these flags matter:
-       *  - Larger cache (30s) absorbs download speed jitter
-       *  - Demux buffer (50MB) prevents "Network error" messages
-       *  - Readahead (20s) ensures smooth playback during file growth
-       *  - These are documented mpv options for unstable streams
+       * VLC FLAGS (progressive playback):
+       *  --file-caching=30000         : 30 second cache (milliseconds)
+       *  --network-caching=30000      : Network cache (for consistency)
+       *  --no-video-title-show        : Don't show filename overlay
+       *  --play-and-exit              : Exit when playback finishes
        *
-       * Without these flags:
-       *  - Player may show "Network error when attempting to fetch resource"
-       *  - Playback may stall when download speed drops
-       *  - Seeking may fail during progressive playback
-       *
-       * CRITICAL FIX: Capture stderr to diagnose exit code 1 failures
-       *  - Previous code used stdio: "ignore" which hid error messages
-       *  - Player was spawning then immediately exiting with code 1
-       *  - No way to diagnose root cause without stderr
-       *  - Now capture stderr and log it when player exits with error
+       * Why player-specific flags matter:
+       *  - MPV: Designed for progressive playback, needs demux buffers
+       *  - VLC: Uses different caching model, simpler flags
+       *  - Using wrong flags = immediate exit code 1
+       *  - Stderr capture shows exact error message
        */
-      const playerProc = spawn(playerCommand, [
-        "--force-seekable=yes",
-        "--cache=yes",
-        "--cache-secs=30",
-        "--demuxer-max-bytes=50M",
-        "--demuxer-readahead-secs=20",
-        "--no-terminal",
-        outputFile
-      ], {
+      let playerArgs = [];
+
+      if (playerCommand === "mpv") {
+        playerArgs = [
+          "--force-seekable=yes",
+          "--cache=yes",
+          "--cache-secs=30",
+          "--demuxer-max-bytes=50M",
+          "--demuxer-readahead-secs=20",
+          "--no-terminal",
+          outputFile
+        ];
+      } else if (playerCommand === "vlc") {
+        playerArgs = [
+          "--file-caching=30000",
+          "--network-caching=30000",
+          "--no-video-title-show",
+          "--play-and-exit",
+          outputFile
+        ];
+      }
+
+      const playerProc = spawn(playerCommand, playerArgs, {
         detached: true,  // Run independently of Node.js process
         stdio: ["ignore", "ignore", "pipe"]  // Capture stderr for error diagnosis
       });
